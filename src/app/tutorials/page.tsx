@@ -1,6 +1,9 @@
+'use client';
+
+import { useState } from 'react';
 import Navbar from '@/components/Navbar';
 import Footer from '@/components/Footer';
-import { BookOpen, CheckCircle2, Tag, ListTodo, Brain, ChevronRight, Clock, CalendarClock, Sun, CalendarCheck2 } from 'lucide-react';
+import { BookOpen, CheckCircle2, Tag, ListTodo, Brain, ChevronRight, Clock, CalendarClock, Sun, CalendarCheck2, ChevronDown, ChevronUp } from 'lucide-react';
 
 const guides = [
     {
@@ -8,7 +11,7 @@ const guides = [
         description: "Learn how to organize your multi-step goals into manageable projects.",
         icon: ListTodo,
         steps: [
-            "You can create a new project either using the + button at the top of the Projects tab, or when by typing the new project's name from within a task.",
+            "You can create a new project either using the + button at the top of the Projects tab, or by typing the new project's name when selecting a project on a task.",
             "If you mark a project as sequential, only the first task in that project will be visible in your task lists.",
             "Reorder your projects to keep the most important ones at the top of the list.",
             "Mark a project as 'On hold' by swiping left on it if you don't plan to work on it at the moment",
@@ -82,7 +85,88 @@ const guides = [
     }
 ];
 
+function TutorialItem({ guide, isOpen, onToggle }: { guide: typeof guides[0], isOpen: boolean, onToggle: () => void }) {
+    return (
+        <div
+            className={`bg-gray-50 rounded-2xl border transition-all duration-200 overflow-hidden ${isOpen ? 'border-blue-200 shadow-md ring-1 ring-blue-100' : 'border-gray-200 hover:border-blue-100'
+                }`}
+        >
+            <button
+                onClick={onToggle}
+                className="w-full flex items-center gap-4 p-6 sm:p-8 text-left focus:outline-none"
+            >
+                <div className={`p-3 rounded-xl shadow-sm transition-colors ${isOpen ? 'bg-blue-600 text-white' : 'bg-white text-blue-600'
+                    }`}>
+                    <guide.icon className="w-6 h-6" />
+                </div>
+
+                <div className="flex-1">
+                    <h2 className="text-xl sm:text-2xl font-bold text-gray-900">
+                        {guide.title}
+                    </h2>
+                </div>
+
+                <div className={`transition-transform duration-200 ${isOpen ? 'rotate-180' : ''} text-gray-400`}>
+                    <ChevronDown className="w-6 h-6" />
+                </div>
+            </button>
+
+            {/* Content Area */}
+            <div
+                className={`transition-all duration-300 ease-in-out ${isOpen ? 'max-h-[800px] opacity-100' : 'max-h-0 opacity-0'
+                    }`}
+            >
+                <div className="px-6 pb-6 sm:px-8 sm:pb-8 pt-0 pl-[5.5rem]">
+                    <p className="text-gray-600 mb-6 leading-relaxed text-lg">
+                        {guide.description}
+                    </p>
+
+                    <div className="bg-white rounded-xl p-6 border border-gray-200">
+                        <ul className="space-y-4">
+                            {guide.steps.map((step, stepIndex) => (
+                                <li key={stepIndex} className="flex items-start gap-3">
+                                    <span className="flex-shrink-0 mt-1 text-blue-600">
+                                        <ChevronRight className="w-5 h-5" />
+                                    </span>
+                                    <span className="text-gray-700">{step}</span>
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 export default function TutorialsPage() {
+    // Optional: Keep one open at a time (accordion style) or multiple?
+    // User asked for "collapsible", screenshot shows one open. Accordion feel is usually cleaner.
+    // Let's implement independent toggles for flexibility, or maybe one state.
+    // I'll stick to independent for now as it's less restrictive, unless user asked for "accordion" specifically.
+    // Wait, "a bit like in this screenshot" implies matching it.
+    // I'll use a simple index tracker if I want strict accordion, or just independent state in the child.
+    // Let's lift state to manage it here?
+
+    // Actually, independent state is simpler for users (compare multiple guides).
+    // But let's handle it in the parent to be safe if we want to add "Expand All".
+
+    // Let's just use local state in the TutorialItem? No, strict accordion (one open) is often requested.
+    // But screenshot shows *only* one open? It shows one open, others closed.
+    // I'll do independent state for maximum utility.
+
+    // Refactoring to map and use state items.
+
+    // Instead of complex state, I will just let the TutorialItem handle itself initially?
+    // No, better to lift it if I want to enforce "one open".
+    // I'll use `openIndex`.
+
+    const [openIndex, setOpenIndex] = useState<number | null>(0); // Open the first one by default? Or none? Screenshot has first one open. 
+
+    const handleToggle = (index: number) => {
+        setOpenIndex(openIndex === index ? null : index);
+    };
+
     return (
         <main className="min-h-screen bg-white">
             <Navbar />
@@ -100,36 +184,14 @@ export default function TutorialsPage() {
                     </p>
                 </div>
 
-                <div className="space-y-8">
+                <div className="space-y-4">
                     {guides.map((guide, index) => (
-                        <div key={index} className="bg-gray-50 rounded-2xl p-8 border border-gray-100 hover:border-blue-100 transition-colors">
-                            <div className="flex items-start gap-4">
-                                <div className="p-3 bg-white rounded-xl shadow-sm text-blue-600">
-                                    <guide.icon className="w-6 h-6" />
-                                </div>
-                                <div className="flex-1">
-                                    <h2 className="text-2xl font-bold text-gray-900 mb-2">
-                                        {guide.title}
-                                    </h2>
-                                    <p className="text-gray-600 mb-6 leading-relaxed">
-                                        {guide.description}
-                                    </p>
-
-                                    <div className="bg-white rounded-xl p-6 border border-gray-200">
-                                        <ul className="space-y-4">
-                                            {guide.steps.map((step, stepIndex) => (
-                                                <li key={stepIndex} className="flex items-start gap-3">
-                                                    <span className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-full bg-blue-100 text-blue-600">
-                                                        <ChevronRight className="w-4 h-4" />
-                                                    </span>
-                                                    <span className="text-gray-700">{step}</span>
-                                                </li>
-                                            ))}
-                                        </ul>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
+                        <TutorialItem
+                            key={index}
+                            guide={guide}
+                            isOpen={openIndex === index}
+                            onToggle={() => handleToggle(index)}
+                        />
                     ))}
                 </div>
             </div>
