@@ -31,7 +31,9 @@ export default function Hero() {
                 {/* CTAs */}
                 <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
                     <Link
-                        href="#"
+                        href="https://apps.apple.com/es/app/next-idea/id6448846931?l=en-GB"
+                        target="_blank"
+                        rel="noopener noreferrer"
                         className="inline-flex items-center justify-center px-8 py-3.5 text-base font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-full transition-all hover:shadow-lg hover:shadow-blue-500/25 min-w-[200px]"
                     >
                         Download on App Store

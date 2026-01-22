@@ -2,20 +2,20 @@ import { Target, ListTodo, Tag, Cloud } from 'lucide-react';
 
 const features = [
     {
-        title: "Focus List",
-        description: "Prioritize your day by adding only the tasks you intend to complete now. Avoid overwhelm.",
+        title: "Next Actions List",
+        description: "Prioritize your day easily by seeing a complete list of all of your next actions, and reordering them.",
         icon: Target,
         color: "bg-blue-100 text-blue-600",
     },
     {
         title: "Projects",
-        description: "Organize multi-step outcomes into projects. Keep your actionable tasks separate from big goals.",
+        description: "Organize multi-step outcomes into projects. Keep your actionable tasks separate from your bigger goals.",
         icon: ListTodo,
         color: "bg-purple-100 text-purple-600",
     },
     {
         title: "Context Tags",
-        description: "Batch tasks by context (e.g., @home, @office) to clear your list efficiently.",
+        description: "Group tasks by context (e.g., @home, @office) to focus only on tasks that you can work on based on where you are.",
         icon: Tag,
         color: "bg-red-100 text-red-600",
     },
@@ -33,10 +33,10 @@ export default function Features() {
             <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div className="text-center mb-16">
                     <h2 className="text-3xl font-bold tracking-tight text-gray-900 sm:text-4xl">
-                        Designed for Focus
+                        Designed for getting things done
                     </h2>
                     <p className="mt-4 text-lg text-gray-600">
-                        Everything you need to get things done, without the clutter.
+                        Everything you need to be productive, without the clutter.
                     </p>
                 </div>
 
