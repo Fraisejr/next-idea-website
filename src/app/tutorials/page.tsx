@@ -11,6 +11,7 @@ const guides = [
         description: "Learn how to organize your multi-step goals into manageable projects.",
         icon: ListTodo,
         steps: [
+            "A project is an outcome that you want to achieve that requires more than one physical action to complete.",
             "You can create a new project either using the + button at the top of the Projects tab, or by typing the new project's name when selecting a project on a task.",
             "If you mark a project as sequential, only the first task in that project will be visible in your task lists.",
             "Reorder your projects to keep the most important ones at the top of the list.",
@@ -59,16 +60,6 @@ const guides = [
             "Create tags like @home, @office, or @phone.",
             "Assign tags to tasks when creating them.",
             "Filter your list by tag when you are in that context."
-        ]
-    },
-    {
-        title: "Daily task review",
-        description: "The daily review is a great way to kick-start your day.",
-        icon: Sun,
-        steps: [
-            "Before you start your day, do a quick review of your Projects and Next actions list.",
-            "Move the tasks that you want to work on today to the top of the list, by swiping right on the task.",
-            "You can also swipe left on several tasks and tap on Select in order to mass update your tasks."
         ]
     },
     {
