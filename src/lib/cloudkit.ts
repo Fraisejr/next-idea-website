@@ -20,6 +20,19 @@ export interface ProjectRecord {
     };
 }
 
+export interface TaskRecord {
+    recordName: string;
+    recordChangeTag: string;
+    recordType: 'CD_Task';
+    fields: {
+        CD_name: { value: string };
+        CD_id: { value: string };
+        CD_order?: { value: number };
+        CD_completed?: { value: number }; // 0 for false, 1 for true
+        CD_project?: { value: { recordName: string, action: string, zoneID?: any } }; // Reference
+    };
+}
+
 // Helper to check if window.CloudKit is available
 export const isCloudKitLoaded = () => {
     return typeof window !== 'undefined' && 'CloudKit' in window;
