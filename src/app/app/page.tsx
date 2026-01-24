@@ -168,7 +168,7 @@ function ProjectsList() {
                     filterBy: [{
                         fieldName: 'CD_project',
                         comparator: 'EQUALS',
-                        fieldValue: { value: projectRecordID }
+                        fieldValue: { value: selectedProject.recordName }
                     }],
                     desiredKeys: ['CD_name', 'CD_id', 'CD_order', 'CD_project', 'CD_completed'],
                     resultsLimit: 200
@@ -178,6 +178,7 @@ function ProjectsList() {
                 if (result.hasErrors) throw new Error(result.errors[0].message);
 
                 const taskRecords = result.records as TaskRecord[];
+
 
                 // Sort by Order
                 taskRecords.sort((a, b) => (a.fields.CD_order?.value ?? 0) - (b.fields.CD_order?.value ?? 0));
