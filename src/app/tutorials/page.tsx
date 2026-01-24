@@ -67,11 +67,12 @@ const guides = [
         description: "The weekly review is essential to keep your system trusted and up to date.",
         icon: CalendarCheck2,
         steps: [
+            "The weekly review is an essential step to make you trust that your system is complete and up to date.",
             "Set aside 15 or 30 minutes once a week for your weekly review.",
             "Go to the Menu and select 'Review tasks' to get started. This will show you a checklist of the recommended actions for completing your weekly review.",
             "Tap on any of the actions to jump to the relevant view.",
-            "Swipe on each of the actions to complete them, and tap on Complete review once you are done, which updates the Last review date.",
-            "The weekly review is a great way to make you trust that your system is complete and up to date."
+            "Tap on the circle next to each of the actions to mark them as completed.",
+            "Tap on Complete review once you are done, which updates the Last review date.",
         ]
     }
 ];

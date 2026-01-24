@@ -16,6 +16,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="scroll-smooth" suppressHydrationWarning>
+      <head>
+        <script src="https://cdn.apple-cloudkit.com/ck/2/cloudkit.js" async></script>
+      </head>
       <body className={`${inter.variable} antialiased`} suppressHydrationWarning>{children}</body>
     </html>
   );
