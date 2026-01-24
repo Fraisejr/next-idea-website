@@ -29,7 +29,9 @@ export interface TaskRecord {
         CD_id: { value: string };
         CD_order?: { value: number };
         CD_completed?: { value: number }; // 0 for false, 1 for true
-        CD_project?: { value: { recordName: string, action: string, zoneID?: any } }; // Reference
+        CD_ticked?: { value: number }; // 0 for false, 1 for true
+        CD_modifieddate?: { value: number }; // Timestamp
+        CD_project?: { value: string }; // Project Reference ID (String)
     };
 }
 
