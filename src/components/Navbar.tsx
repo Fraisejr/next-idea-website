@@ -35,7 +35,7 @@ export default function Navbar() {
 
                     {/* Navigation Links */}
                     <div className="hidden md:flex items-center gap-8">
-                        <Link href="/#overview" className="text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors">
+                        <Link href="/#overview" className="text-gray-600 hover:text-blue-600 font-medium transition-colors">
                             Overview
                         </Link>
                         <Link
