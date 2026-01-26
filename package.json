@@ -7,6 +7,7 @@
     "dev:http": "next dev",
     "build": "next build",
     "start": "next start",
+    "serve:https": "npx serve out --ssl-cert localhost+2.pem --ssl-key localhost+2-key.pem",
     "lint": "eslint"
   },
   "dependencies": {
