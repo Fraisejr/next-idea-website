@@ -5,7 +5,7 @@ import { CloudKitProvider, useCloudKit } from '@/components/CloudKitProvider';
 import Navbar from '@/components/Navbar';
 import Footer from '@/components/Footer';
 import { ProjectRecord, TaskRecord } from '@/lib/cloudkit';
-import { Loader2, ListTodo, CheckCircle2, Pencil, Check, X, ClipboardList, Plus, Clock, RotateCcw } from 'lucide-react';
+import { Loader2, ListTodo, CheckCircle2, Pencil, Check, X, ClipboardList, Plus, Clock, RotateCcw, Calendar, Hourglass, Repeat, Moon, ChevronRight, Zap, Inbox } from 'lucide-react';
 
 function ProjectsList() {
     const { container, isAuthenticated, isLoading, login } = useCloudKit();
@@ -25,10 +25,17 @@ function ProjectsList() {
     const [selectedProject, setSelectedProject] = useState<ProjectRecord | null>(null);
     const [tasks, setTasks] = useState<TaskRecord[]>([]);
     const [loadingTasks, setLoadingTasks] = useState(false);
+    const [taskError, setTaskError] = useState<string | null>(null);
 
     // View Mode
-    const [viewMode, setViewMode] = useState<'project' | 'history'>('project');
+    const [viewMode, setViewMode] = useState<'project' | 'history' | 'inbox'>('project'); // Default to project, or could default to inbox?
     const [completingTaskIds, setCompletingTaskIds] = useState<Set<string>>(new Set());
+
+    // Details Panel State
+    const [selectedTaskDetails, setSelectedTaskDetails] = useState<TaskRecord | null>(null);
+
+    // Optimistic State Cache (to handle query latency)
+    const [optimisticTasks, setOptimisticTasks] = useState<Record<string, TaskRecord>>({});
 
     const handleEditClick = (project: ProjectRecord) => {
         // Use recordName as ID for editing state
@@ -105,22 +112,37 @@ function ProjectsList() {
 
             // Handle New Task Creation
             if (task.recordName === 'new-task') {
+                // CRITICAL: Generate a proper recordName (UUID) for CloudKit compatibility
+                // Without this, CloudKit sync fails on iOS
+                const recordName = crypto.randomUUID();
+
+                console.log('[CloudKit Sync] Creating new task with recordName:', recordName);
+
                 const newRecord = {
+                    recordName: recordName, // FIXED: Added recordName for CloudKit compatibility
                     recordType: 'CD_Task',
                     fields: {
                         CD_name: { value: editTaskName },
                         CD_id: { value: crypto.randomUUID() },
-                        CD_project: { value: selectedProject?.recordName || '' }, // String ID
+                        // For Inbox, we MUST OMIT CD_project (or send null, but omit is safer for "no fields")
+                        // If we are in project mode, use selectedProject. If inbox mode, omit it.
+                        ...(viewMode === 'inbox' ? {} : { CD_project: { value: selectedProject?.recordName || '' } }),
                         CD_completed: { value: 0 },
                         // Use the order we set in the local state object
                         CD_order: { value: task.fields.CD_order?.value || 0 },
                     }
                 };
 
+                console.log('[CloudKit Sync] Saving new task:', newRecord);
                 const saveResult = await privateDB.saveRecords([newRecord], { zoneID });
-                if (saveResult.hasErrors) throw new Error(saveResult.errors[0].message);
+
+                if (saveResult.hasErrors) {
+                    console.error('[CloudKit Sync] Failed to save new task:', saveResult.errors);
+                    throw new Error(saveResult.errors[0].message);
+                }
 
                 const savedRecord = saveResult.records[0];
+                console.log('[CloudKit Sync] ✅ Task created successfully:', savedRecord.recordName);
 
                 // Replace temp task with real one
                 setTasks(prev => prev.map(t =>
@@ -167,7 +189,7 @@ function ProjectsList() {
     };
 
     const handleCreateTask = () => {
-        if (!selectedProject || editingTaskId) return; // Don't start if already editing
+        if ((!selectedProject && viewMode !== 'inbox') || editingTaskId) return; // Don't start if already editing
 
         const newTask: TaskRecord = {
             recordName: 'new-task',
@@ -176,7 +198,7 @@ function ProjectsList() {
             fields: {
                 CD_name: { value: '' },
                 CD_id: { value: 'new-task' },
-                CD_project: { value: selectedProject.recordName },
+                ...(viewMode === 'inbox' ? {} : { CD_project: { value: selectedProject?.recordName || '' } }),
                 CD_completed: { value: 0 },
                 CD_order: { value: tasks.reduce((max, t) => Math.max(max, t.fields.CD_order?.value || 0), 0) + 1 }
             }
@@ -188,7 +210,7 @@ function ProjectsList() {
     };
 
     const handleInsertTask = async (afterTask: TaskRecord) => {
-        if (!selectedProject || editingTaskId || !container) return;
+        if ((!selectedProject && viewMode !== 'inbox') || editingTaskId || !container) return;
 
         // Find index of afterTask
         const index = tasks.findIndex(t => t.recordName === afterTask.recordName);
@@ -232,7 +254,7 @@ function ProjectsList() {
             fields: {
                 CD_name: { value: '' },
                 CD_id: { value: crypto.randomUUID() }, // Client-side UUID for new task
-                CD_project: { value: selectedProject.recordName },
+                ...(viewMode === 'inbox' ? {} : { CD_project: { value: selectedProject?.recordName || '' } }),
                 CD_completed: { value: 0 },
                 CD_order: { value: newOrder }
             }
@@ -310,7 +332,12 @@ function ProjectsList() {
     // Fetch Projects using Query (Works)
     useEffect(() => {
         const fetchProjects = async () => {
-            if (!container) return;
+            if (!container) {
+                console.log('[CloudKit Projects] Container not available');
+                return;
+            }
+
+            console.log('[CloudKit Projects] 🚀 Fetching projects from CloudKit...');
             setFetching(true);
             setError(null);
             try {
@@ -322,11 +349,28 @@ function ProjectsList() {
                     resultsLimit: 100
                 };
                 const options = { zoneID: { zoneName: 'com.apple.coredata.cloudkit.zone' } };
+
+                console.log('[CloudKit Projects] Executing query:', query);
                 const result = await privateDB.performQuery(query, options);
-                if (result.hasErrors) throw new Error(result.errors[0].message);
+
+                if (result.hasErrors) {
+                    console.error('[CloudKit Projects] ❌ Query errors:', result.errors);
+                    throw new Error(result.errors[0].message);
+                }
 
                 let records = result.records as ProjectRecord[];
+                console.log(`[CloudKit Projects] ✅ Received ${records.length} total projects from CloudKit`);
+                console.log('[CloudKit Projects] Raw projects:', records.map(p => ({
+                    name: p.fields.CD_name?.value,
+                    completed: p.fields.CD_completed?.value,
+                    singleActions: p.fields.CD_singleactions?.value,
+                    order: p.fields.CD_order?.value
+                })));
+
+                const beforeFilter = records.length;
                 records = records.filter(p => !p.fields.CD_completed || p.fields.CD_completed.value !== 1);
+                console.log(`[CloudKit Projects] 🔍 Filtered out ${beforeFilter - records.length} completed projects`);
+
                 records.sort((a, b) => {
                     const isSingleA = a.fields.CD_singleactions?.value === 1;
                     const isSingleB = b.fields.CD_singleactions?.value === 1;
@@ -337,13 +381,18 @@ function ProjectsList() {
                     return orderA - orderB;
                 });
 
+                console.log(`[CloudKit Projects] 📋 Final project list (${records.length} projects):`);
+                records.forEach((p, i) => {
+                    console.log(`  ${i + 1}. "${p.fields.CD_name?.value}" (order: ${p.fields.CD_order?.value})`);
+                });
+
                 setProjects(records);
                 // Select first project by default if none selected
                 if (records.length > 0 && !selectedProject) {
                     setSelectedProject(records[0]);
                 }
             } catch (err: any) {
-                console.error('Fetch error:', err);
+                console.error('[CloudKit Projects] ❌ Fetch error:', err);
                 setError(err.message || 'Failed to fetch projects');
             } finally {
                 setFetching(false);
@@ -402,15 +451,25 @@ function ProjectsList() {
             const taskRecord = fetchResult.records[0];
 
             // 2. Update project reference
-            // The CloudKit schema for this field is actually a String (containing the ID), 
-            // not a native Reference type, as confirmed by the "expected type STRING" error.
-            taskRecord.fields.CD_project = {
-                value: targetProject.recordName
-            };
+            if (targetProject.recordName === 'inbox-pseudo-project') {
+                // Remove the field entirely (send null or undefined? CloudKit JS usually expects value: null to delete)
+                taskRecord.fields.CD_project = { value: null };
+            } else {
+                taskRecord.fields.CD_project = {
+                    value: targetProject.recordName
+                };
+            }
 
             // 3. Save
             const saveResult = await privateDB.saveRecords([taskRecord], { zoneID });
             if (saveResult.hasErrors) throw new Error(saveResult.errors[0].message);
+
+            // 4. Update Optimistic Cache
+            const savedRecord = saveResult.records[0];
+            setOptimisticTasks(prev => ({
+                ...prev,
+                [savedRecord.recordName]: savedRecord
+            }));
 
             console.log('Task reassigned successfully');
 
@@ -508,16 +567,24 @@ function ProjectsList() {
 
     // Fetch Tasks logic
     useEffect(() => {
-        const fetchTasks = async () => {
-            if (!container) return;
+        const fetchTasks = async (isPoll = false) => {
+            if (!container) {
+                console.log('[CloudKit Sync] Container not available, skipping fetch');
+                return;
+            }
 
             // If in project mode but no project selected, clear tasks
             if (viewMode === 'project' && !selectedProject) {
+                console.log('[CloudKit Sync] No project selected in project mode, clearing tasks');
                 setTasks([]);
                 return;
             }
 
-            setLoadingTasks(true);
+            const timestamp = new Date().toLocaleTimeString();
+            console.log(`[CloudKit Sync] ${isPoll ? '🔄 Polling' : '📥 Initial fetch'} started at ${timestamp}`);
+            console.log(`[CloudKit Sync] View mode: ${viewMode}`, selectedProject ? `Project: ${selectedProject.fields.CD_name?.value}` : '');
+
+            if (!isPoll) setLoadingTasks(true);
             try {
                 const privateDB = container.privateCloudDatabase;
                 const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
@@ -535,6 +602,21 @@ function ProjectsList() {
                         desiredKeys: ['CD_name', 'CD_id', 'CD_order', 'CD_project', 'CD_completed'],
                         resultsLimit: 200
                     };
+                } else if (viewMode === 'inbox') {
+                    // Inbox: Fetch all active tasks, filter locally for no project.
+                    // This handles cases where project is empty string OR null/missing.
+                    query = {
+                        recordType: 'CD_Task',
+                        filterBy: [
+                            {
+                                fieldName: 'CD_completed',
+                                comparator: 'NOT_EQUALS',
+                                fieldValue: { value: 1 }
+                            }
+                        ],
+                        desiredKeys: ['CD_name', 'CD_id', 'CD_order', 'CD_project', 'CD_completed', 'CD_date', 'CD_recurring', 'CD_recurrence', 'CD_recurrencetype'],
+                        resultsLimit: 400
+                    };
                 } else if (viewMode === 'history') {
                     // Fetch ALL completed tasks
                     query = {
@@ -544,75 +626,230 @@ function ProjectsList() {
                             comparator: 'EQUALS',
                             fieldValue: { value: 1 }
                         }],
-                        desiredKeys: ['CD_name', 'CD_id', 'CD_order', 'CD_project', 'CD_completed'],
+                        desiredKeys: ['CD_name', 'CD_id', 'CD_order', 'CD_project', 'CD_completed', 'CD_modifieddate'],
                         resultsLimit: 100
                     };
                 } else {
                     // No project selected in project mode, or other unhandled viewMode
+                    console.log('[CloudKit Sync] Unhandled view mode, clearing tasks');
                     setTasks([]);
                     setLoadingTasks(false);
                     return;
                 }
 
+                console.log('[CloudKit Sync] Executing query:', query);
                 const result = await privateDB.performQuery(query, { zoneID });
-                if (result.hasErrors) throw new Error(result.errors[0].message);
 
-                const taskRecords = result.records as TaskRecord[];
+                if (result.hasErrors) {
+                    console.error('[CloudKit Sync] Query returned errors:', result.errors);
+                    throw new Error(result.errors[0].message);
+                }
 
-                // Sort by Order
-                // For history, maybe sort by modification date? But we don't have it easily available in desiredKeys.
-                // Existing sort uses CD_order.
-                taskRecords.sort((a, b) => (a.fields.CD_order?.value ?? 0) - (b.fields.CD_order?.value ?? 0));
+                let taskRecords = result.records as TaskRecord[];
+                console.log(`[CloudKit Sync] ✅ Received ${taskRecords.length} tasks from CloudKit`);
 
+                // --- OPTIMISTIC MERGE ---
+                // Apply overrides from optimisticTasks
+
+                // 1. Update existing records with overrides
+                taskRecords = taskRecords.map(t => optimisticTasks[t.recordName] || t);
+
+                // 2. Filter out records that no longer belong to this view
+                if (viewMode === 'project' && selectedProject) {
+                    taskRecords = taskRecords.filter(t => t.fields.CD_project?.value === selectedProject.recordName);
+                } else if (viewMode === 'inbox') {
+                    taskRecords = taskRecords.filter(t => !t.fields.CD_project?.value);
+                }
+
+                // 3. Append missing records from optimisticTasks that BELONG to this view
+                Object.values(optimisticTasks).forEach(override => {
+                    // Check if not completed
+                    if (override.fields.CD_completed?.value === 1) return;
+
+                    if (viewMode === 'project' && selectedProject) {
+                        if (override.fields.CD_project?.value === selectedProject.recordName) {
+                            if (!taskRecords.find(t => t.recordName === override.recordName)) {
+                                taskRecords.push(override);
+                            }
+                        }
+                    } else if (viewMode === 'inbox') {
+                        if (!override.fields.CD_project?.value) {
+                            if (!taskRecords.find(t => t.recordName === override.recordName)) {
+                                taskRecords.push(override);
+                            }
+                        }
+                    }
+                });
+                // ------------------------
+
+                // Sort tasks
+                if (viewMode === 'history') {
+                    // Sort by Modified Date DESC (Most recent first)
+                    taskRecords.sort((a, b) => (b.fields.CD_modifieddate?.value ?? 0) - (a.fields.CD_modifieddate?.value ?? 0));
+                } else {
+                    // Default: Sort by Order ASC
+                    taskRecords.sort((a, b) => (a.fields.CD_order?.value ?? 0) - (b.fields.CD_order?.value ?? 0));
+                }
+
+                console.log(`[CloudKit Sync] 📋 Final task count after filtering: ${taskRecords.length}`);
+                setTasks(taskRecords);
                 setTasks(taskRecords);
             } catch (err: any) {
-                console.error('Fetch tasks error:', err);
-                setTasks([]);
+                console.error('[CloudKit Sync] ❌ Fetch tasks error:', err);
+                setTaskError(err.message || 'Failed to fetch tasks');
+                if (!isPoll) setTasks([]);
             } finally {
-                setLoadingTasks(false);
+                if (!isPoll) setLoadingTasks(false);
             }
         };
 
+        console.log('[CloudKit Sync] 🚀 Setting up polling interval');
         fetchTasks();
-    }, [selectedProject, viewMode, container]);
+
+        // Poll every 10 seconds to keep fresh
+        const intervalId = setInterval(() => fetchTasks(true), 10000);
+        console.log('[CloudKit Sync] ⏰ Polling interval created:', intervalId);
+
+        return () => {
+            console.log('[CloudKit Sync] 🛑 Cleaning up polling interval:', intervalId);
+            clearInterval(intervalId);
+        };
+    }, [selectedProject, viewMode, container]); // FIXED: Removed optimisticTasks from dependencies
 
 
     const handleToggleComplete = async (task: TaskRecord) => {
         if (!container) return;
 
         const isCompleting = task.fields.CD_completed?.value !== 1;
+        const isRecurring = task.fields.CD_recurring?.value === 1;
 
         // Optimistic UI updates
-        // If we in 'project' mode and completing -> hide it (add to completingIds then remove)
-        // If we in 'history' mode and uncompleting -> hide it (restore to project)
-
-        // For simplicity: We just update local state CD_completed.
-        // If viewMode=project:
-        //   - completing: hide after animation
-        //   - uncompleting: (not possible usually as they are hidden, unless we just undid it)
-        // If viewMode=history:
-        //   - uncompleting: hide immediately (remove from this list)
-        //   - completing: (not possible as they are already completed)
+        if (viewMode === 'project' && isCompleting) {
+            setCompletingTaskIds(prev => new Set(prev).add(task.recordName));
+            if (!isRecurring) {
+                // Only hide if not recurring (recurrence stays in list but updates date)
+                // Actually, for user feedback, maybe we still "flash" it or show a "Rescheduled" toast?
+                // For now, let's treat recurring task update as an immediate update in place.
+                setTimeout(() => {
+                    setCompletingTaskIds(prev => {
+                        const next = new Set(prev);
+                        next.delete(task.recordName);
+                        return next;
+                    });
+                }, 1000);
+            } else {
+                // Clean up the completing ID immediately after state update so it doesn't stay "faded"
+                setTimeout(() => {
+                    setCompletingTaskIds(prev => {
+                        const next = new Set(prev);
+                        next.delete(task.recordName);
+                        return next;
+                    });
+                }, 500); // Shorter flash for update
+            }
+        }
 
         const privateDB = container.privateCloudDatabase;
         const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
 
-        // Optimistic Update
-        if (viewMode === 'project' && isCompleting) {
-            setCompletingTaskIds(prev => new Set(prev).add(task.recordName));
-            setTimeout(() => {
-                setCompletingTaskIds(prev => {
-                    const next = new Set(prev);
-                    next.delete(task.recordName);
-                    return next;
-                });
-            }, 1000);
+        // RECURRING TASK LOGIC
+        if (isRecurring && isCompleting) {
+            // 1. Calculate New Date
+            const currentTimestamp = task.fields.CD_date?.value || Date.now();
+            const recurrenceVal = task.fields.CD_recurrence?.value || 1;
+            const recurrenceType = task.fields.CD_recurrencetype?.value || 'days';
+
+            const nextDate = new Date(currentTimestamp);
+
+            switch (recurrenceType) {
+                case 'weeks':
+                    nextDate.setDate(nextDate.getDate() + (recurrenceVal * 7));
+                    break;
+                case 'months':
+                    nextDate.setMonth(nextDate.getMonth() + recurrenceVal);
+                    break;
+                case 'years':
+                    nextDate.setFullYear(nextDate.getFullYear() + recurrenceVal);
+                    break;
+                case 'days':
+                default:
+                    nextDate.setDate(nextDate.getDate() + recurrenceVal);
+                    break;
+            }
+
+            const nextTimestamp = nextDate.getTime();
+
+            // 2. Create History Record (Completed Duplicate)
+            // Generate a random UUID-like string for the new record name
+            const historyRecordName = crypto.randomUUID();
+
+            const historyRecord = {
+                recordName: historyRecordName,
+                recordType: 'CD_Task',
+                fields: {
+                    ...task.fields,
+                    CD_recurring: { value: 0 },
+                    CD_completed: { value: 1 },
+                    CD_ticked: { value: 1 },
+                    CD_modifieddate: { value: Date.now() },
+                    CD_id: { value: crypto.randomUUID() }, // New unique ID for the history instance
+                    // Ensure we don't carry over cloudkit system fields if they were in fields (they usually aren't directly)
+                }
+            };
+
+            // 3. Update Original Record
+            const originalUpdate = {
+                recordName: task.recordName,
+                recordChangeTag: task.recordChangeTag,
+                fields: {
+                    CD_date: { value: nextTimestamp },
+                    CD_modifieddate: { value: Date.now() }
+                    // CD_completed remains 0
+                }
+            };
+
+            // Local Update
+            setTasks(prev => {
+                const updatedList = prev.map(t =>
+                    t.recordName === task.recordName
+                        ? { ...t, fields: { ...t.fields, CD_date: { value: nextTimestamp } } }
+                        : t
+                );
+                // We typically don't show the history item in 'project' view, so no need to insert it into 'tasks' state
+                // unless we are in history view? But we are "completing" it, so it goes to history.
+                return updatedList;
+            });
+
+            // Persist Batch
+            try {
+                const result = await privateDB.saveRecords([historyRecord, originalUpdate], { zoneID });
+                if (result.hasErrors) throw new Error(result.errors[0].message);
+
+                console.log('Recurring task processed: duplicated history and rescheduled original.');
+
+                // Update local change tag for original task
+                const savedOriginal = result.records.find((r: any) => r.recordName === task.recordName);
+                if (savedOriginal) {
+                    setTasks(currentTasks => currentTasks.map(t =>
+                        t.recordName === task.recordName
+                            ? { ...t, recordChangeTag: savedOriginal.recordChangeTag }
+                            : t
+                    ));
+                }
+
+            } catch (err) {
+                console.error('Recurring task save failed:', err);
+                alert('Failed to process recurring task');
+                // Revert local state?
+                window.location.reload();
+            }
+
+            return;
         }
 
-        // Update Local State array
-        // If in history mode and we uncomplete, we should remove it from the list immediately or animate?
-        // Let's just update the value, and let the render filter handle it (if we filter history by completed=1).
+        // STANDARD TOGGLE LOGIC (Non-recurring or Un-completing)
 
+        // Update Local State array
         setTasks(prev => prev.map(t =>
             t.recordName === task.recordName
                 ? { ...t, fields: { ...t.fields, CD_completed: { value: isCompleting ? 1 : 0 } } }
@@ -653,11 +890,160 @@ function ProjectsList() {
     const visibleTasks = tasks.filter(t => {
         if (viewMode === 'project') {
             return (t.fields.CD_completed?.value !== 1) || completingTaskIds.has(t.recordName);
+        } else if (viewMode === 'inbox') {
+            // Inbox: Show tasks with NO project (or empty string) AND not completed
+            return (!t.fields.CD_project?.value) && (t.fields.CD_completed?.value !== 1 || completingTaskIds.has(t.recordName));
         } else {
             // History mode
             return t.fields.CD_completed?.value === 1;
         }
     });
+
+    // Details Side Panel Handlers
+    const handleTaskClick = (task: TaskRecord) => {
+        setSelectedTaskDetails(task);
+    };
+
+    // Modified to accept batch updates or single field
+    const handleUpdateTaskDetail = async (fieldOrUpdates: keyof TaskRecord['fields'] | Record<string, any>, value?: any) => {
+        if (!selectedTaskDetails || !container) return;
+
+        let updates: Record<string, any> = {};
+        if (typeof fieldOrUpdates === 'string') {
+            updates[fieldOrUpdates] = value;
+        } else {
+            updates = fieldOrUpdates;
+        }
+
+        const updatedTask = { ...selectedTaskDetails };
+
+        // Update local state details immediately
+        Object.entries(updates).forEach(([key, val]) => {
+            const field = key as keyof TaskRecord['fields'];
+            if (!updatedTask.fields[field]) {
+                (updatedTask.fields as any)[field] = { value: val };
+            } else {
+                (updatedTask.fields as any)[field].value = val;
+            }
+        });
+
+        // Always update modified date
+        updatedTask.fields.CD_modifieddate = { value: Date.now() };
+
+        setSelectedTaskDetails(updatedTask);
+
+        // Update main list state
+        setTasks(prev => prev.map(t => t.recordName === updatedTask.recordName ? updatedTask : t));
+
+        // Persist
+        try {
+            const privateDB = container.privateCloudDatabase;
+            const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
+
+            const fieldsToSave: Record<string, any> = {
+                CD_modifieddate: { value: Date.now() }
+            };
+
+            Object.entries(updates).forEach(([key, val]) => {
+                fieldsToSave[key] = { value: val };
+            });
+
+            const recordToSave = {
+                recordName: updatedTask.recordName,
+                recordChangeTag: updatedTask.recordChangeTag,
+                fields: fieldsToSave
+            };
+
+            const result = await privateDB.saveRecords([recordToSave], { zoneID });
+            if (result.hasErrors) throw new Error(result.errors[0].message);
+
+            // Sync change tag
+            const savedRecord = result.records[0];
+            const finalTask = { ...updatedTask, recordChangeTag: savedRecord.recordChangeTag };
+
+            setSelectedTaskDetails(finalTask);
+            setTasks(prev => prev.map(t => t.recordName === finalTask.recordName ? finalTask : t));
+
+        } catch (err) {
+            console.error('Failed to update task details:', err);
+        }
+    };
+
+    // Status Helper Logic
+    const toggleStatus = (type: 'next' | 'someday' | 'waiting') => {
+        if (!selectedTaskDetails) return;
+
+        const isSomeday = selectedTaskDetails.fields.CD_someday?.value === 1;
+        const isWaiting = selectedTaskDetails.fields.CD_waitingfor?.value === 1;
+        const isNext = !isSomeday && !isWaiting;
+
+        let updates: Record<string, any> = {};
+
+        if (type === 'next') {
+            if (isNext) {
+                // Untick Next -> Toggle Someday (as requested)
+                updates = { CD_someday: 1, CD_waitingfor: 0 };
+            } else {
+                // Tick Next -> Clear others
+                updates = { CD_someday: 0, CD_waitingfor: 0 };
+            }
+        } else if (type === 'someday') {
+            if (isSomeday) {
+                // Untick Someday -> Next
+                updates = { CD_someday: 0, CD_waitingfor: 0 };
+            } else {
+                // Tick Someday -> Clear others
+                updates = { CD_someday: 1, CD_waitingfor: 0 };
+            }
+        } else if (type === 'waiting') {
+            if (isWaiting) {
+                // Untick Waiting -> Next
+                updates = { CD_someday: 0, CD_waitingfor: 0 };
+            } else {
+                // Tick Waiting -> Clear others
+                updates = { CD_someday: 0, CD_waitingfor: 1 };
+            }
+        }
+
+        handleUpdateTaskDetail(updates);
+    };
+
+    const handleToggleDate = () => {
+        if (!selectedTaskDetails) return;
+        const isActive = selectedTaskDetails.fields.CD_dateactive?.value === 1;
+
+        let updates: Record<string, any> = {};
+        if (isActive) {
+            // Turning OFF: Disable Date AND Reminder AND Recurring
+            updates = { CD_dateactive: 0, CD_reminderactive: 0, CD_recurring: 0 };
+        } else {
+            // Turning ON: Enable Date, ensure date value exists (default to today if null)
+            updates = { CD_dateactive: 1 };
+            if (!selectedTaskDetails.fields.CD_date?.value) {
+                updates.CD_date = Date.now();
+            }
+        }
+        handleUpdateTaskDetail(updates);
+    };
+
+    const handleToggleReminder = () => {
+        if (!selectedTaskDetails) return;
+        const isActive = selectedTaskDetails.fields.CD_reminderactive?.value === 1;
+
+        let updates: Record<string, any> = {};
+        if (isActive) {
+            // Turning OFF: Just disable Reminder
+            updates = { CD_reminderactive: 0 };
+        } else {
+            // Turning ON: Enable Reminder AND Date
+            updates = { CD_reminderactive: 1, CD_dateactive: 1 };
+            if (!selectedTaskDetails.fields.CD_date?.value) {
+                updates.CD_date = Date.now();
+            }
+        }
+        handleUpdateTaskDetail(updates);
+    };
+
 
     if (isLoading) {
         return (
@@ -685,7 +1071,45 @@ function ProjectsList() {
         <div className="flex h-[calc(100vh-64px)] mt-16 bg-white overflow-hidden relative">
             {/* Sidebar: Projects */}
             <div className="w-64 border-r border-gray-100 bg-gray-50/50 flex flex-col">
-                <div className="p-4 border-b border-gray-100 bg-white">
+                <div className="p-2 space-y-1 mt-2 mx-2">
+                    <div
+                        onClick={() => {
+                            setViewMode('inbox');
+                            setSelectedProject(null);
+                        }}
+                        onDragOver={(e) => {
+                            e.preventDefault();
+                            e.dataTransfer.dropEffect = 'move';
+                            if (dragOverProjectId !== 'inbox-pseudo-project') {
+                                setDragOverProjectId('inbox-pseudo-project');
+                            }
+                        }}
+                        onDragEnter={(e) => {
+                            e.preventDefault();
+                            if (dragOverProjectId !== 'inbox-pseudo-project') {
+                                setDragOverProjectId('inbox-pseudo-project');
+                            }
+                        }}
+                        onDragLeave={(e) => {
+                            // Prevent flickering when hovering over children
+                            if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                                setDragOverProjectId(null);
+                            }
+                        }}
+                        onDrop={(e) => handleDrop(e, { recordName: 'inbox-pseudo-project', recordType: 'CD_Project', fields: { CD_name: { value: 'Inbox' }, CD_id: { value: 'inbox' } } } as any)}
+                        className={`group flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${viewMode === 'inbox'
+                            ? 'bg-blue-50 text-blue-700'
+                            : dragOverProjectId === 'inbox-pseudo-project'
+                                ? 'bg-blue-100 ring-2 ring-blue-300 ring-inset'
+                                : 'hover:bg-gray-100 text-gray-700'
+                            }`}
+                    >
+                        <Inbox className="w-5 h-5 text-blue-500" />
+                        <span className="font-medium">Inbox</span>
+                    </div>
+                </div>
+
+                <div className="p-4 border-b border-gray-100 border-t mt-2">
                     <h2 className="font-bold text-gray-900 flex items-center gap-2">
                         <ClipboardList className="w-5 h-5 text-blue-600" />
                         Projects ({projects.length})
@@ -705,9 +1129,26 @@ function ProjectsList() {
                                     setSelectedProject(project);
                                     setViewMode('project');
                                 }}
-                                onDragOver={(e) => handleDragOver(e, project)}
-                                onDragEnter={() => handleDragEnter(project)}
-                                onDragLeave={handleDragLeave}
+                                onDragOver={(e) => {
+                                    e.preventDefault();
+                                    e.dataTransfer.dropEffect = 'move';
+                                    if (dragOverProjectId !== project.recordName) {
+                                        setDragOverProjectId(project.recordName);
+                                    }
+                                }}
+                                onDragEnter={(e) => {
+                                    e.preventDefault();
+                                    if (dragOverProjectId !== project.recordName) {
+                                        setDragOverProjectId(project.recordName);
+                                    }
+                                }}
+                                onDragLeave={(e) => {
+                                    // Prevent flickering: only clear if moving OUT of the container
+                                    // e.relatedTarget is the element we are entering
+                                    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                                        setDragOverProjectId(null);
+                                    }
+                                }}
                                 onDrop={(e) => handleDrop(e, project)}
                                 className={`group flex items-center justify-between p-2 rounded-lg cursor-pointer transition-colors ${viewMode === 'project' && selectedProject?.recordName === project.recordName
                                     ? 'bg-blue-50 text-blue-700'
@@ -755,6 +1196,174 @@ function ProjectsList() {
                     )}
                 </div>
 
+
+                {/* Task Details Side Panel */}
+                {selectedTaskDetails && (
+                    <div className="absolute inset-0 z-50 bg-black/10 backdrop-blur-[1px] flex justify-end">
+                        {/* Click backdrop to close */}
+                        <div className="absolute inset-0" onClick={() => setSelectedTaskDetails(null)} />
+
+                        <div className="relative w-96 bg-white shadow-2xl border-l border-gray-100 h-full flex flex-col animate-in slide-in-from-right duration-300">
+                            <div className="p-6 border-b border-gray-100 flex justify-between items-start bg-gray-50/50">
+                                <div>
+                                    <h2 className="font-bold text-lg text-gray-900 break-words line-clamp-2">
+                                        {selectedTaskDetails.fields.CD_name?.value}
+                                    </h2>
+                                    <p className="text-xs text-gray-400 mt-1">Details</p>
+                                </div>
+                                <button onClick={() => setSelectedTaskDetails(null)} className="text-gray-400 hover:text-gray-600 mt-1">
+                                    <X className="w-5 h-5" />
+                                </button>
+                            </div>
+
+                            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                                {/* Date Field */}
+                                {/* Date & Reminder Section */}
+                                <div className="space-y-4">
+                                    <div className="flex items-center gap-4">
+                                        {/* Date Toggle */}
+                                        <div className="flex-1 flex items-center justify-between p-3 rounded-lg border border-gray-100 cursor-pointer hover:bg-gray-50 transition-colors" onClick={handleToggleDate}>
+                                            <div className="flex items-center gap-2">
+                                                <Calendar className={`w-4 h-4 ${selectedTaskDetails.fields.CD_dateactive?.value === 1 ? 'text-blue-500' : 'text-gray-400'}`} />
+                                                <span className={`text-sm font-medium ${selectedTaskDetails.fields.CD_dateactive?.value === 1 ? 'text-gray-900' : 'text-gray-500'}`}>Date</span>
+                                            </div>
+                                            <div className={`w-8 h-4 rounded-full p-0.5 transition-colors ${selectedTaskDetails.fields.CD_dateactive?.value === 1 ? 'bg-blue-500' : 'bg-gray-200'}`}>
+                                                <div className={`w-3 h-3 bg-white rounded-full transition-transform ${selectedTaskDetails.fields.CD_dateactive?.value === 1 ? 'translate-x-4' : ''}`} />
+                                            </div>
+                                        </div>
+
+                                        {/* Reminder Toggle */}
+                                        <div className="flex-1 flex items-center justify-between p-3 rounded-lg border border-gray-100 cursor-pointer hover:bg-gray-50 transition-colors" onClick={handleToggleReminder}>
+                                            <div className="flex items-center gap-2">
+                                                <Clock className={`w-4 h-4 ${selectedTaskDetails.fields.CD_reminderactive?.value === 1 ? 'text-blue-500' : 'text-gray-400'}`} />
+                                                <span className={`text-sm font-medium ${selectedTaskDetails.fields.CD_reminderactive?.value === 1 ? 'text-gray-900' : 'text-gray-500'}`}>Reminder</span>
+                                            </div>
+                                            <div className={`w-8 h-4 rounded-full p-0.5 transition-colors ${selectedTaskDetails.fields.CD_reminderactive?.value === 1 ? 'bg-blue-500' : 'bg-gray-200'}`}>
+                                                <div className={`w-3 h-3 bg-white rounded-full transition-transform ${selectedTaskDetails.fields.CD_reminderactive?.value === 1 ? 'translate-x-4' : ''}`} />
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Conditional Input */}
+                                    {selectedTaskDetails.fields.CD_dateactive?.value === 1 && (
+                                        <div className="animate-in fade-in slide-in-from-top-2 duration-200">
+                                            <input
+                                                type={selectedTaskDetails.fields.CD_reminderactive?.value === 1 ? "datetime-local" : "date"}
+                                                className="w-full text-sm p-2 border border-blue-100 bg-blue-50/30 rounded-lg focus:ring-2 focus:ring-blue-100 focus:border-blue-400 outline-none transition-all text-gray-700"
+                                                value={selectedTaskDetails.fields.CD_date?.value ?
+                                                    (selectedTaskDetails.fields.CD_reminderactive?.value === 1
+                                                        ? new Date(selectedTaskDetails.fields.CD_date.value).toISOString().slice(0, 16)
+                                                        : new Date(selectedTaskDetails.fields.CD_date.value).toISOString().slice(0, 10)
+                                                    ) : ''}
+                                                onChange={(e) => {
+                                                    const dateVal = e.target.value ? new Date(e.target.value).getTime() : 0;
+                                                    handleUpdateTaskDetail('CD_date', dateVal);
+                                                }}
+                                            />
+
+                                            <div
+                                                className="mt-2 flex items-center gap-2 cursor-pointer group w-fit"
+                                                onClick={() => handleUpdateTaskDetail('CD_recurring', selectedTaskDetails.fields.CD_recurring?.value === 1 ? 0 : 1)}
+                                            >
+                                                <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${selectedTaskDetails.fields.CD_recurring?.value === 1 ? 'bg-blue-500 border-blue-500' : 'border-gray-300 group-hover:border-blue-400'}`}>
+                                                    {selectedTaskDetails.fields.CD_recurring?.value === 1 && <Check className="w-3 h-3 text-white" />}
+                                                </div>
+                                                <span className={`text-xs ${selectedTaskDetails.fields.CD_recurring?.value === 1 ? 'text-blue-600 font-medium' : 'text-gray-500 group-hover:text-gray-700'}`}>Recurring Task</span>
+                                            </div>
+
+                                            {selectedTaskDetails.fields.CD_recurring?.value === 1 && (
+                                                <div className="mt-2 flex items-center gap-2 animate-in fade-in slide-in-from-top-1 duration-200">
+                                                    <div className="w-16">
+                                                        <input
+                                                            type="number"
+                                                            min="1"
+                                                            className="w-full text-xs p-1.5 border border-gray-200 rounded focus:ring-1 focus:ring-blue-500 outline-none"
+                                                            value={selectedTaskDetails.fields.CD_recurrence?.value || 1}
+                                                            onChange={(e) => handleUpdateTaskDetail('CD_recurrence', parseInt(e.target.value) || 1)}
+                                                        />
+                                                    </div>
+                                                    <div className="flex-1">
+                                                        <select
+                                                            className="w-full text-xs p-1.5 border border-gray-200 rounded focus:ring-1 focus:ring-blue-500 outline-none bg-white"
+                                                            value={selectedTaskDetails.fields.CD_recurrencetype?.value || 'days'}
+                                                            onChange={(e) => handleUpdateTaskDetail('CD_recurrencetype', e.target.value)}
+                                                        >
+                                                            <option value="days">Days</option>
+                                                            <option value="weeks">Weeks</option>
+                                                            <option value="months">Months</option>
+                                                            <option value="years">Years</option>
+                                                        </select>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+
+                                <hr className="border-gray-100" />
+
+                                {/* Toggles */}
+                                <div className="space-y-4">
+                                    {/* Next Action (Calculated: !someday && !waiting) */}
+                                    <div className="flex items-center justify-between group cursor-pointer" onClick={() => toggleStatus('next')}>
+                                        <div className="flex items-center gap-3">
+                                            <div className={`p-2 rounded-lg ${(!selectedTaskDetails.fields.CD_someday?.value && !selectedTaskDetails.fields.CD_waitingfor?.value) ? 'bg-yellow-100 text-yellow-600' : 'bg-gray-100 text-gray-400'}`}>
+                                                <Zap className="w-5 h-5" />
+                                            </div>
+                                            <div>
+                                                <p className="font-medium text-sm text-gray-900">Next Action</p>
+                                                <p className="text-xs text-gray-500">Do this as soon as possible</p>
+                                            </div>
+                                        </div>
+                                        <div className={`w-10 h-6 rounded-full p-1 transition-colors ${(!selectedTaskDetails.fields.CD_someday?.value && !selectedTaskDetails.fields.CD_waitingfor?.value) ? 'bg-yellow-500' : 'bg-gray-200'}`}>
+                                            <div className={`w-4 h-4 bg-white rounded-full transition-transform ${(!selectedTaskDetails.fields.CD_someday?.value && !selectedTaskDetails.fields.CD_waitingfor?.value) ? 'translate-x-4' : ''}`} />
+                                        </div>
+                                    </div>
+
+                                    <div className="flex items-center justify-between group cursor-pointer" onClick={() => toggleStatus('someday')}>
+                                        <div className="flex items-center gap-3">
+                                            <div className={`p-2 rounded-lg ${selectedTaskDetails.fields.CD_someday?.value === 1 ? 'bg-purple-100 text-purple-600' : 'bg-gray-100 text-gray-400'}`}>
+                                                <Moon className="w-5 h-5" />
+                                            </div>
+                                            <div>
+                                                <p className="font-medium text-sm text-gray-900">Someday / Maybe</p>
+                                                <p className="text-xs text-gray-500">No immediate action</p>
+                                            </div>
+                                        </div>
+                                        <div className={`w-10 h-6 rounded-full p-1 transition-colors ${selectedTaskDetails.fields.CD_someday?.value === 1 ? 'bg-purple-500' : 'bg-gray-200'}`}>
+                                            <div className={`w-4 h-4 bg-white rounded-full transition-transform ${selectedTaskDetails.fields.CD_someday?.value === 1 ? 'translate-x-4' : ''}`} />
+                                        </div>
+                                    </div>
+
+                                    <div className="flex items-center justify-between group cursor-pointer" onClick={() => toggleStatus('waiting')}>
+                                        <div className="flex items-center gap-3">
+                                            <div className={`p-2 rounded-lg ${selectedTaskDetails.fields.CD_waitingfor?.value === 1 ? 'bg-orange-100 text-orange-600' : 'bg-gray-100 text-gray-400'}`}>
+                                                <Hourglass className="w-5 h-5" />
+                                            </div>
+                                            <div>
+                                                <p className="font-medium text-sm text-gray-900">Waiting For</p>
+                                                <p className="text-xs text-gray-500">Waiting on someone else</p>
+                                            </div>
+                                        </div>
+                                        <div className={`w-10 h-6 rounded-full p-1 transition-colors ${selectedTaskDetails.fields.CD_waitingfor?.value === 1 ? 'bg-orange-500' : 'bg-gray-200'}`}>
+                                            <div className={`w-4 h-4 bg-white rounded-full transition-transform ${selectedTaskDetails.fields.CD_waitingfor?.value === 1 ? 'translate-x-4' : ''}`} />
+                                        </div>
+                                    </div>
+
+
+                                </div>
+                            </div>
+
+                            {/* Footer info */}
+                            <div className="p-4 bg-gray-50 text-xs text-gray-400 border-t border-gray-100 flex justify-between">
+                                <span>Change Tag: {selectedTaskDetails.recordChangeTag.slice(0, 8)}...</span>
+                                <span>{selectedTaskDetails.fields.CD_modifieddate?.value ? new Date(selectedTaskDetails.fields.CD_modifieddate.value).toLocaleTimeString() : 'No date'}</span>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+
                 {/* Sidebar Footer: Global Views */}
                 <div className="p-2 border-t border-gray-100 bg-white">
                     <div
@@ -780,10 +1389,10 @@ function ProjectsList() {
                         <h1 className="text-2xl font-bold text-gray-900">
                             {viewMode === 'project'
                                 ? (selectedProject?.fields.CD_name?.value || 'Select a Project')
-                                : 'Completed Tasks'
+                                : viewMode === 'inbox' ? 'Inbox' : 'Completed Tasks'
                             }
                         </h1>
-                        {viewMode === 'project' && selectedProject && (
+                        {(viewMode === 'project' && selectedProject || viewMode === 'inbox') && (
                             <button
                                 onClick={handleCreateTask}
                                 className="p-1 rounded-full text-gray-400 hover:bg-blue-50 hover:text-blue-600 transition-colors"
@@ -794,6 +1403,13 @@ function ProjectsList() {
                         )}
                     </div>
                 </div>
+
+                {taskError && (
+                    <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2 text-red-700 text-sm">
+                        <X className="w-4 h-4" />
+                        <span>{taskError}</span>
+                    </div>
+                )}
 
                 <div className="flex-1 overflow-y-auto p-6">
                     {loadingTasks ? (
@@ -807,6 +1423,11 @@ function ProjectsList() {
                                     <ListTodo className="w-12 h-12 text-gray-300 mx-auto mb-4" />
                                     <p className="text-gray-500">No active tasks in this project.</p>
                                 </>
+                            ) : viewMode === 'inbox' ? (
+                                <>
+                                    <Inbox className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+                                    <p className="text-gray-500">Inbox is empty.</p>
+                                </>
                             ) : (
                                 <>
                                     <CheckCircle2 className="w-12 h-12 text-green-200 mx-auto mb-4" />
@@ -819,14 +1440,14 @@ function ProjectsList() {
                             {visibleTasks.map(task => (
                                 <div
                                     key={task.recordName}
-                                    draggable={viewMode === 'project' && editingTaskId !== task.recordName} // Disable drag when editing or in history
+                                    draggable={(viewMode === 'project' || viewMode === 'inbox') && editingTaskId !== task.recordName} // Enable drag for Project AND Inbox
                                     onDragStart={(e) => handleDragStart(e, task)}
                                     // Drop Handlers for Reordering
                                     onDragOver={handleTaskDragOver}
                                     onDragEnter={() => handleTaskDragEnter(task)}
                                     onDragLeave={handleTaskDragLeave}
                                     onDrop={(e) => handleTaskDrop(e, task)}
-                                    className={`group p-4 bg-white border border-gray-100 rounded-xl hover:shadow-sm transition-all flex items-center gap-3 ${viewMode === 'project' ? 'cursor-grab active:cursor-grabbing hover:border-blue-100' : 'opacity-75'
+                                    className={`group p-4 bg-white border border-gray-100 rounded-xl hover:shadow-sm transition-all flex items-center gap-3 ${(viewMode === 'project' || viewMode === 'inbox') ? 'cursor-grab active:cursor-grabbing hover:border-blue-100' : 'opacity-75'
                                         } ${dragOverTaskId === task.recordName
                                             ? 'border-blue-400 border-t-4 border-t-blue-500' // Visual cue (insert above style) 
                                             : ''
@@ -845,9 +1466,9 @@ function ProjectsList() {
                                         )}
                                     </div>
 
-                                    <div className="flex-1 min-w-0">
+                                    <div className="flex-1 min-w-0" onClick={() => handleTaskClick(task)}>
                                         {editingTaskId === task.recordName ? (
-                                            <div className="flex items-center gap-2">
+                                            <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                                                 <input
                                                     type="text"
                                                     value={editTaskName}
@@ -863,13 +1484,22 @@ function ProjectsList() {
                                                 <button onClick={() => handleTaskCancel()} className="text-red-600 p-1 hover:bg-red-50 rounded"><X className="w-4 h-4" /></button>
                                             </div>
                                         ) : (
-                                            <div className="flex items-center justify-between w-full relative">
+                                            <div className="flex items-center justify-between w-full relative cursor-pointer">
                                                 <span className={`text-gray-900 ${task.fields.CD_completed?.value === 1 ? 'line-through text-gray-400' : ''}`}>
                                                     {task.fields.CD_name?.value}
                                                 </span>
+                                                {/* Meta Icons (Mini badges) */}
+                                                <div className="flex items-center gap-1 ml-2">
+                                                    {task.fields.CD_date?.value && task.fields.CD_dateactive?.value === 1 ? <span className="text-[10px] bg-red-50 text-red-500 px-1.5 py-0.5 rounded flex items-center gap-1"><Calendar className="w-3 h-3" /> {new Date(task.fields.CD_date.value).toLocaleDateString()}</span> : null}
+                                                    {(!task.fields.CD_someday?.value && !task.fields.CD_waitingfor?.value) ? <span title="Next Action" className="text-yellow-500"><Zap className="w-3 h-3" /></span> : null}
+                                                    {task.fields.CD_waitingfor?.value === 1 && <span title="Waiting For" className="text-orange-400"><Hourglass className="w-3 h-3" /></span>}
+                                                    {task.fields.CD_someday?.value === 1 && <span title="Someday" className="text-purple-400"><Moon className="w-3 h-3" /></span>}
+                                                    {task.fields.CD_recurring?.value === 1 && <span title="Recurring" className="text-blue-400"><Repeat className="w-3 h-3" /></span>}
+                                                </div>
+
                                                 {/* Only show actions in Project Mode */}
                                                 {viewMode === 'project' && (
-                                                    <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    <div className="flex items-center ml-auto opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
                                                         <button
                                                             onClick={() => handleInsertTask(task)}
                                                             className="p-1 mr-1 text-gray-400 hover:text-green-600 rounded"
@@ -883,11 +1513,12 @@ function ProjectsList() {
                                                         >
                                                             <Pencil className="w-3.5 h-3.5" />
                                                         </button>
+                                                        <ChevronRight className="w-4 h-4 text-gray-300" />
                                                     </div>
                                                 )}
                                                 {/* Show different actions or Project Name in History Mode? */}
                                                 {viewMode === 'history' && (
-                                                    <span className="text-xs text-gray-400">
+                                                    <span className="text-xs text-gray-400 ml-auto">
                                                         {projects.find(p => p.recordName === task.fields.CD_project?.value)?.fields.CD_name?.value}
                                                     </span>
                                                 )}
@@ -900,7 +1531,7 @@ function ProjectsList() {
                     )}
                 </div>
             </div>
-        </div>
+        </div >
     );
 }
 

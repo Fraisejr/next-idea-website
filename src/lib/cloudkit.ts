@@ -32,6 +32,14 @@ export interface TaskRecord {
         CD_ticked?: { value: number }; // 0 for false, 1 for true
         CD_modifieddate?: { value: number }; // Timestamp
         CD_project?: { value: string }; // Project Reference ID (String)
+        CD_someday?: { value: number }; // 0/1
+        CD_waitingfor?: { value: number }; // 0/1
+        CD_date?: { value: number }; // Timestamp
+        CD_recurring?: { value: number }; // 0/1
+        CD_dateactive?: { value: number }; // 0/1
+        CD_reminderactive?: { value: number }; // 0/1
+        CD_recurrence?: { value: number }; // Int16
+        CD_recurrencetype?: { value: string }; // String
     };
 }
 
