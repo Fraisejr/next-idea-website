@@ -5,7 +5,7 @@ import { CloudKitProvider, useCloudKit } from '@/components/CloudKitProvider';
 import Navbar from '@/components/Navbar';
 import Footer from '@/components/Footer';
 import { ProjectRecord, TaskRecord } from '@/lib/cloudkit';
-import { Loader2, ListTodo, CheckCircle2, Pencil, Check, X, ClipboardList, Plus, Clock, RotateCcw, Calendar, Hourglass, Repeat, Moon, ChevronRight, Zap, Inbox, Keyboard, CalendarClock } from 'lucide-react';
+import { Loader2, ListTodo, CheckCircle2, Pencil, Check, X, ClipboardList, Plus, Clock, RotateCcw, Calendar, Hourglass, Repeat, Moon, ChevronRight, Zap, Inbox, Keyboard, CalendarClock, CalendarDays } from 'lucide-react';
 
 function ProjectsList() {
     const { container, isAuthenticated, isLoading, login } = useCloudKit();
@@ -28,7 +28,7 @@ function ProjectsList() {
     const [taskError, setTaskError] = useState<string | null>(null);
 
     // View Mode
-    const [viewMode, setViewMode] = useState<'project' | 'history' | 'inbox' | 'next_actions' | 'someday' | 'due'>('project'); // Default to project, or could default to inbox?
+    const [viewMode, setViewMode] = useState<'project' | 'history' | 'inbox' | 'next_actions' | 'someday' | 'due' | 'waiting' | 'deferred'>('next_actions'); // Default to next_actions
     const [completingTaskIds, setCompletingTaskIds] = useState<Set<string>>(new Set());
 
     // Details Panel State
@@ -239,7 +239,7 @@ function ProjectsList() {
                 console.log('[CloudKit Sync] Creating new task with recordName:', recordName);
 
                 // Find Single Actions project for Next Actions view or Someday view
-                const singleActionsProject = (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due')
+                const singleActionsProject = (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due' || viewMode === 'waiting' || viewMode === 'deferred')
                     ? projects.find(p => p.fields.CD_singleactions?.value === 1)
                     : null;
 
@@ -251,10 +251,13 @@ function ProjectsList() {
                         CD_id: { value: crypto.randomUUID() },
                         // Inbox: omit project. Next Actions/Someday/Due: use Single Actions project. Project mode: use selectedProject.
                         ...(viewMode === 'inbox' ? {}
-                            : (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due') ? { CD_project: { value: singleActionsProject?.recordName || '' } }
-                                : { CD_project: { value: selectedProject?.recordName || '' } }),
+                            : (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due' || viewMode === 'waiting' || viewMode === 'deferred')
+                                ? (singleActionsProject?.recordName ? { CD_project: { value: singleActionsProject.recordName } } : {})
+                                : (selectedProject?.recordName ? { CD_project: { value: selectedProject.recordName } } : {})),
                         ...(viewMode === 'someday' ? { CD_someday: { value: 1 } } : {}),
-                        ...(viewMode === 'due' ? { CD_date: { value: Date.now() } } : {}), // Default to Today
+                        ...(viewMode === 'due' ? { CD_date: { value: Date.now() }, CD_dateactive: { value: 1 } } : {}), // Default to Today & Active
+                        ...(viewMode === 'waiting' ? { CD_waitingfor: { value: 1 }, CD_someday: { value: 0 } } : {}),
+                        ...(viewMode === 'deferred' ? { CD_date: { value: new Date(new Date().setHours(24, 0, 0, 0)).getTime() }, CD_dateactive: { value: 1 }, CD_hideuntildate: { value: 1 }, CD_someday: { value: 0 } } : {}),
                         CD_completed: { value: 0 },
                         // Use the order we set in the local state object
                         CD_order: { value: task.fields.CD_order?.value || 0 },
@@ -274,7 +277,15 @@ function ProjectsList() {
 
                 // Replace temp task with real one
                 setTasks(prev => prev.map(t =>
-                    t.recordName === 'new-task' ? savedRecord : t
+                    t.recordName === 'new-task' ? {
+                        ...savedRecord,
+                        fields: {
+                            ...savedRecord.fields,
+                            ...((viewMode === 'due' && !savedRecord.fields.CD_date) ? { CD_date: { value: Date.now() }, CD_dateactive: { value: 1 } } : {}),
+                            ...((viewMode === 'waiting' && !savedRecord.fields.CD_waitingfor) ? { CD_waitingfor: { value: 1 }, CD_someday: { value: 0 } } : {}),
+                            ...((viewMode === 'deferred' && !savedRecord.fields.CD_date) ? { CD_date: { value: new Date(new Date().setHours(24, 0, 0, 0)).getTime() }, CD_dateactive: { value: 1 }, CD_hideuntildate: { value: 1 }, CD_someday: { value: 0 } } : {})
+                        }
+                    } : t
                 ));
 
                 // Add to optimistic tasks to prevent flickering on next poll/fetch
@@ -323,10 +334,10 @@ function ProjectsList() {
     };
 
     const handleCreateTask = () => {
-        if ((!selectedProject && viewMode !== 'inbox' && viewMode !== 'next_actions' && viewMode !== 'someday' && viewMode !== 'due') || editingTaskId) return; // Don't start if already editing
+        if ((!selectedProject && viewMode !== 'inbox' && viewMode !== 'next_actions' && viewMode !== 'someday' && viewMode !== 'due' && viewMode !== 'waiting' && viewMode !== 'deferred') || editingTaskId) return; // Don't start if already editing
 
         // Find Single Actions project for Next Actions view or Someday view
-        const singleActionsProject = (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due')
+        const singleActionsProject = (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due' || viewMode === 'waiting' || viewMode === 'deferred')
             ? projects.find(p => p.fields.CD_singleactions?.value === 1)
             : null;
 
@@ -339,9 +350,13 @@ function ProjectsList() {
                 CD_id: { value: 'new-task' },
                 // Inbox: omit project. Next Actions/Someday: use Single Actions project. Project mode: use selectedProject.
                 ...(viewMode === 'inbox' ? {}
-                    : (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due') ? { CD_project: { value: singleActionsProject?.recordName || '' } }
-                        : { CD_project: { value: selectedProject?.recordName || '' } }),
+                    : (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due' || viewMode === 'waiting' || viewMode === 'deferred')
+                        ? (singleActionsProject?.recordName ? { CD_project: { value: singleActionsProject.recordName } } : {})
+                        : (selectedProject?.recordName ? { CD_project: { value: selectedProject.recordName } } : {})),
                 ...(viewMode === 'someday' ? { CD_someday: { value: 1 } } : {}),
+                ...(viewMode === 'due' ? { CD_date: { value: Date.now() }, CD_dateactive: { value: 1 } } : {}),
+                ...(viewMode === 'waiting' ? { CD_waitingfor: { value: 1 }, CD_someday: { value: 0 } } : {}),
+                ...(viewMode === 'deferred' ? { CD_date: { value: new Date(new Date().setHours(24, 0, 0, 0)).getTime() }, CD_dateactive: { value: 1 }, CD_hideuntildate: { value: 1 }, CD_someday: { value: 0 } } : {}),
                 CD_completed: { value: 0 },
                 CD_order: { value: tasks.reduce((max, t) => Math.max(max, t.fields.CD_order?.value || 0), 0) + 1 }
             }
@@ -353,7 +368,7 @@ function ProjectsList() {
     };
 
     const handleInsertTask = async (afterTask: TaskRecord) => {
-        if ((!selectedProject && viewMode !== 'inbox' && viewMode !== 'next_actions' && viewMode !== 'someday' && viewMode !== 'due') || editingTaskId || !container) return;
+        if ((!selectedProject && viewMode !== 'inbox' && viewMode !== 'next_actions' && viewMode !== 'someday' && viewMode !== 'due' && viewMode !== 'waiting' && viewMode !== 'deferred') || editingTaskId || !container) return;
 
         // Find index of afterTask
         const index = tasks.findIndex(t => t.recordName === afterTask.recordName);
@@ -390,7 +405,7 @@ function ProjectsList() {
         });
 
         // Find Single Actions project for Next Actions view or Someday view
-        const singleActionsProject = (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due')
+        const singleActionsProject = (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due' || viewMode === 'waiting' || viewMode === 'deferred')
             ? projects.find(p => p.fields.CD_singleactions?.value === 1)
             : null;
 
@@ -404,9 +419,13 @@ function ProjectsList() {
                 CD_id: { value: crypto.randomUUID() }, // Client-side UUID for new task
                 // Inbox: omit project. Next Actions/Someday: use Single Actions project. Project mode: use selectedProject.
                 ...(viewMode === 'inbox' ? {}
-                    : (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due') ? { CD_project: { value: singleActionsProject?.recordName || '' } }
-                        : { CD_project: { value: selectedProject?.recordName || '' } }),
+                    : (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due' || viewMode === 'waiting' || viewMode === 'deferred')
+                        ? (singleActionsProject?.recordName ? { CD_project: { value: singleActionsProject.recordName } } : {})
+                        : (selectedProject?.recordName ? { CD_project: { value: selectedProject.recordName } } : {})),
                 ...(viewMode === 'someday' ? { CD_someday: { value: 1 } } : {}),
+                ...(viewMode === 'due' ? { CD_date: { value: Date.now() }, CD_dateactive: { value: 1 } } : {}),
+                ...(viewMode === 'waiting' ? { CD_waitingfor: { value: 1 }, CD_someday: { value: 0 } } : {}),
+                ...(viewMode === 'deferred' ? { CD_date: { value: new Date(new Date().setHours(24, 0, 0, 0)).getTime() }, CD_dateactive: { value: 1 }, CD_hideuntildate: { value: 1 }, CD_someday: { value: 0 } } : {}),
                 CD_completed: { value: 0 },
                 CD_order: { value: newOrder }
             }
@@ -442,9 +461,9 @@ function ProjectsList() {
 
     // Create task at top
     const handleCreateTaskAtTop = () => {
-        if ((!selectedProject && viewMode !== 'inbox' && viewMode !== 'next_actions' && viewMode !== 'someday' && viewMode !== 'due') || editingTaskId) return;
+        if ((!selectedProject && viewMode !== 'inbox' && viewMode !== 'next_actions' && viewMode !== 'someday' && viewMode !== 'due' && viewMode !== 'waiting' && viewMode !== 'deferred') || editingTaskId) return;
 
-        const singleActionsProject = (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due')
+        const singleActionsProject = (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due' || viewMode === 'waiting' || viewMode === 'deferred')
             ? projects.find(p => p.fields.CD_singleactions?.value === 1)
             : null;
 
@@ -456,9 +475,13 @@ function ProjectsList() {
                 CD_name: { value: '' },
                 CD_id: { value: 'new-task' },
                 ...(viewMode === 'inbox' ? {}
-                    : (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due') ? { CD_project: { value: singleActionsProject?.recordName || '' } }
-                        : { CD_project: { value: selectedProject?.recordName || '' } }),
+                    : (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due' || viewMode === 'waiting' || viewMode === 'deferred')
+                        ? (singleActionsProject?.recordName ? { CD_project: { value: singleActionsProject.recordName } } : {})
+                        : (selectedProject?.recordName ? { CD_project: { value: selectedProject.recordName } } : {})),
                 ...(viewMode === 'someday' ? { CD_someday: { value: 1 } } : {}),
+                ...(viewMode === 'due' ? { CD_date: { value: Date.now() }, CD_dateactive: { value: 1 } } : {}),
+                ...(viewMode === 'waiting' ? { CD_waitingfor: { value: 1 }, CD_someday: { value: 0 } } : {}),
+                ...(viewMode === 'deferred' ? { CD_date: { value: new Date(new Date().setHours(24, 0, 0, 0)).getTime() }, CD_dateactive: { value: 1 }, CD_hideuntildate: { value: 1 }, CD_someday: { value: 0 } } : {}),
                 CD_completed: { value: 0 },
                 CD_order: { value: 0 } // Top of the list
             }
@@ -891,6 +914,246 @@ function ProjectsList() {
         }
     };
 
+    const handleDropWaiting = async (e: React.DragEvent) => {
+        e.preventDefault();
+        setDragOverProjectId(null);
+
+        const id = e.dataTransfer.getData('text/plain');
+        if (!id || !container) return;
+
+        // Optimistic update
+        setTasks(prev => prev.map(t => {
+            if (t.recordName === id) {
+                const singleActionsProject = projects.find(p => p.fields.CD_singleactions?.value === 1);
+                // If it doesn't have a project, assign Single Actions
+                const needsProject = !t.fields.CD_project?.value;
+
+                return {
+                    ...t,
+                    fields: {
+                        ...t.fields,
+                        CD_waitingfor: { value: 1 },
+                        CD_someday: { value: 0 },
+                        CD_completed: { value: 0 },
+                        ...(needsProject && singleActionsProject?.recordName ? { CD_project: { value: singleActionsProject.recordName } } : {})
+                    }
+                };
+            }
+            return t;
+        }));
+
+        try {
+            const privateDB = container.privateCloudDatabase;
+            const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
+
+            // 1. Fetch latest version
+            const fetchResult = await privateDB.fetchRecords([id], { zoneID });
+            if (fetchResult.hasErrors) throw new Error(fetchResult.errors[0].message);
+            const taskRecord = fetchResult.records[0];
+
+            // 2. Update fields
+            const singleActionsProject = projects.find(p => p.fields.CD_singleactions?.value === 1);
+            const needsProject = !taskRecord.fields.CD_project?.value;
+
+            const updates: any = {
+                CD_waitingfor: { value: 1 },
+                CD_someday: { value: 0 },
+                CD_completed: { value: 0 },
+                CD_modifieddate: { value: Date.now() }
+            };
+
+            if (needsProject && singleActionsProject) {
+                updates.CD_project = { value: singleActionsProject.recordName };
+            }
+
+            Object.assign(taskRecord.fields, updates);
+
+            // 3. Save
+            const saveResult = await privateDB.saveRecords([taskRecord], { zoneID });
+            if (saveResult.hasErrors) throw new Error(saveResult.errors[0].message);
+
+            // 4. Update Optimistic Cache
+            const savedRecord = saveResult.records[0];
+            setOptimisticTasks(prev => ({
+                ...prev,
+                [savedRecord.recordName]: savedRecord
+            }));
+
+            console.log('Task moved to Waiting for successfully');
+
+        } catch (err: any) {
+            console.error('Move to Waiting for error:', err);
+            alert('Failed to move task to Waiting for: ' + err.message);
+            // Verify/Reload if failed
+            window.location.reload();
+        }
+    };
+
+    const handleDropDeferred = async (e: React.DragEvent) => {
+        e.preventDefault();
+        setDragOverProjectId(null);
+
+        const id = e.dataTransfer.getData('text/plain');
+        if (!id || !container) return;
+
+        // Calculate Tomorrow
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        tomorrow.setHours(0, 0, 0, 0); // Start of day
+        const tomorrowTs = tomorrow.getTime();
+
+        // Optimistic update
+        setTasks(prev => prev.map(t => {
+            if (t.recordName === id) {
+                const singleActionsProject = projects.find(p => p.fields.CD_singleactions?.value === 1);
+                const needsProject = !t.fields.CD_project?.value;
+
+                return {
+                    ...t,
+                    fields: {
+                        ...t.fields,
+                        CD_date: { value: tomorrowTs },
+                        CD_dateactive: { value: 1 },
+                        CD_hideuntildate: { value: 1 },
+                        CD_someday: { value: 0 },
+                        CD_waitingfor: { value: 0 },
+                        CD_completed: { value: 0 },
+                        ...(needsProject && singleActionsProject?.recordName ? { CD_project: { value: singleActionsProject.recordName } } : {})
+                    }
+                };
+            }
+            return t;
+        }));
+
+        try {
+            const privateDB = container.privateCloudDatabase;
+            const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
+
+            // 1. Fetch
+            const fetchResult = await privateDB.fetchRecords([id], { zoneID });
+            if (fetchResult.hasErrors) throw new Error(fetchResult.errors[0].message);
+            const taskRecord = fetchResult.records[0];
+
+            // 2. Update
+            const singleActionsProject = projects.find(p => p.fields.CD_singleactions?.value === 1);
+            const needsProject = !taskRecord.fields.CD_project?.value;
+
+            const updates: any = {
+                CD_date: { value: tomorrowTs },
+                CD_dateactive: { value: 1 },
+                CD_hideuntildate: { value: 1 },
+                CD_someday: { value: 0 },
+                CD_waitingfor: { value: 0 },
+                CD_completed: { value: 0 },
+                CD_modifieddate: { value: Date.now() }
+            };
+
+            if (needsProject && singleActionsProject) {
+                updates.CD_project = { value: singleActionsProject.recordName };
+            }
+
+            Object.assign(taskRecord.fields, updates);
+
+            // 3. Save
+            const saveResult = await privateDB.saveRecords([taskRecord], { zoneID });
+            if (saveResult.hasErrors) throw new Error(saveResult.errors[0].message);
+
+            // 4. Update Cache
+            const savedRecord = saveResult.records[0];
+            setOptimisticTasks(prev => ({
+                ...prev,
+                [savedRecord.recordName]: savedRecord
+            }));
+
+            console.log('Task moved to Deferred successfully');
+
+        } catch (err: any) {
+            console.error('Move to Deferred error:', err);
+            alert('Failed to move task to Deferred: ' + err.message);
+            window.location.reload();
+        }
+    };
+
+    const handleDropDue = async (e: React.DragEvent) => {
+        e.preventDefault();
+        setDragOverProjectId(null);
+
+        const id = e.dataTransfer.getData('text/plain');
+        if (!id || !container) return;
+
+        // Set to Today
+        const todayTs = Date.now();
+
+        // Optimistic update
+        setTasks(prev => prev.map(t => {
+            if (t.recordName === id) {
+                const singleActionsProject = projects.find(p => p.fields.CD_singleactions?.value === 1);
+                const needsProject = !t.fields.CD_project?.value;
+
+                return {
+                    ...t,
+                    fields: {
+                        ...t.fields,
+                        CD_date: { value: todayTs },
+                        CD_dateactive: { value: 1 },
+                        CD_someday: { value: 0 },
+                        CD_waitingfor: { value: 0 },
+                        CD_completed: { value: 0 },
+                        ...(needsProject && singleActionsProject?.recordName ? { CD_project: { value: singleActionsProject.recordName } } : {})
+                    }
+                };
+            }
+            return t;
+        }));
+
+        try {
+            const privateDB = container.privateCloudDatabase;
+            const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
+
+            // 1. Fetch
+            const fetchResult = await privateDB.fetchRecords([id], { zoneID });
+            if (fetchResult.hasErrors) throw new Error(fetchResult.errors[0].message);
+            const taskRecord = fetchResult.records[0];
+
+            // 2. Update
+            const singleActionsProject = projects.find(p => p.fields.CD_singleactions?.value === 1);
+            const needsProject = !taskRecord.fields.CD_project?.value;
+
+            const updates: any = {
+                CD_date: { value: todayTs },
+                CD_dateactive: { value: 1 },
+                CD_someday: { value: 0 },
+                CD_waitingfor: { value: 0 },
+                CD_completed: { value: 0 },
+                CD_modifieddate: { value: Date.now() }
+            };
+
+            if (needsProject && singleActionsProject) {
+                updates.CD_project = { value: singleActionsProject.recordName };
+            }
+
+            Object.assign(taskRecord.fields, updates);
+
+            // 3. Save
+            const saveResult = await privateDB.saveRecords([taskRecord], { zoneID });
+            if (saveResult.hasErrors) throw new Error(saveResult.errors[0].message);
+
+            // 4. Update Cache
+            const savedRecord = saveResult.records[0];
+            setOptimisticTasks(prev => ({
+                ...prev,
+                [savedRecord.recordName]: savedRecord
+            }));
+
+            console.log('Task moved to Due successfully');
+
+        } catch (err: any) {
+            console.error('Move to Due error:', err);
+            alert('Failed to move task to Due: ' + err.message);
+            window.location.reload();
+        }
+    };
+
     const handleDropSomeday = async (e: React.DragEvent) => {
         e.preventDefault();
         setDragOverProjectId(null);
@@ -1095,8 +1358,8 @@ function ProjectsList() {
                         desiredKeys: ['CD_name', 'CD_id', 'CD_order', 'CD_project', 'CD_completed', 'CD_modifieddate', 'CD_hideuntildate'],
                         resultsLimit: 100
                     };
-                } else if (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due') {
-                    // Next Actions & Someday & Due: Fetch all active tasks, extensive client-side filtering
+                } else if (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due' || viewMode === 'waiting' || viewMode === 'deferred') {
+                    // Next Actions & Someday & Due & Waiting & Deferred: Fetch all active tasks, extensive client-side filtering
                     query = {
                         recordType: 'CD_Task',
                         filterBy: [{
@@ -1104,7 +1367,7 @@ function ProjectsList() {
                             comparator: 'NOT_EQUALS',
                             fieldValue: { value: '' }
                         }],
-                        sortBy: [{ fieldName: 'CD_modifieddate', ascending: false }],
+                        sortBy: [{ fieldName: 'CD_order', ascending: true }],
                         desiredKeys: [
                             'CD_name', 'CD_id', 'CD_order', 'CD_project', 'CD_completed',
                             'CD_someday', 'CD_waitingfor', 'CD_dateactive',
@@ -1179,6 +1442,40 @@ function ProjectsList() {
 
                         return true;
                     });
+                } else if (viewMode === 'waiting') {
+                    taskRecords = taskRecords.filter(t => {
+                        const fields = t.fields;
+
+                        // 1. Must not be completed
+                        if (fields.CD_completed?.value === 1) return false;
+
+                        // 2. Must not be Someday
+                        if (fields.CD_someday?.value === 1) return false;
+
+                        // 3. MUST be Waiting For
+                        if (fields.CD_waitingfor?.value !== 1) return false;
+
+                        // 4. Must belong to a Project (not Inbox)
+                        if (!fields.CD_project?.value) return false;
+
+                        // 5. Date Logic: Hide future tasks if "Hide Until" is active
+                        const isDateActive = fields.CD_dateactive?.value === 1;
+                        if (isDateActive) {
+                            const isHideUntil = fields.CD_hideuntildate?.value === 1;
+                            if (isHideUntil && fields.CD_date?.value) {
+                                const today = new Date();
+                                today.setHours(0, 0, 0, 0);
+
+                                const taskDate = new Date(fields.CD_date.value);
+                                taskDate.setHours(0, 0, 0, 0);
+
+                                // If date is in future, HIDE it
+                                if (taskDate > today) return false;
+                            }
+                        }
+
+                        return true;
+                    });
                 } else if (viewMode === 'someday') {
                     taskRecords = taskRecords.filter(t => {
                         const fields = t.fields;
@@ -1226,6 +1523,24 @@ function ProjectsList() {
                         const taskDate = new Date(fields.CD_date.value);
 
                         return taskDate <= todayEnd;
+                    });
+                } else if (viewMode === 'deferred') {
+                    taskRecords = taskRecords.filter(t => {
+                        const fields = t.fields;
+                        if (fields.CD_completed?.value === 1) return false;
+                        if (fields.CD_someday?.value === 1) return false;
+                        if (fields.CD_waitingfor?.value === 1) return false;
+                        if (!fields.CD_project?.value) return false;
+
+                        // Must be Hidden Until Future Date
+                        if (fields.CD_dateactive?.value !== 1) return false;
+                        if (fields.CD_hideuntildate?.value !== 1) return false;
+                        if (!fields.CD_date?.value) return false;
+
+                        const todayEnd = new Date();
+                        todayEnd.setHours(23, 59, 59, 999);
+                        const taskDate = new Date(fields.CD_date.value);
+                        return taskDate > todayEnd;
                     });
                 }
 
@@ -1316,6 +1631,40 @@ function ProjectsList() {
                                 taskRecords.push(override);
                             }
                         }
+                    } else if (viewMode === 'waiting') {
+                        const fields = override.fields;
+                        const today = new Date();
+                        today.setHours(0, 0, 0, 0);
+                        let shouldShow = false;
+
+                        if (
+                            fields.CD_project?.value &&
+                            fields.CD_completed?.value !== 1 &&
+                            fields.CD_someday?.value !== 1 &&
+                            fields.CD_waitingfor?.value === 1 // Must be Waiting
+                        ) {
+                            // Date Checks (Same as Next Actions)
+                            const isDateActive = fields.CD_dateactive?.value === 1;
+                            if (!isDateActive) shouldShow = true;
+                            else {
+                                const isHideUntil = fields.CD_hideuntildate?.value === 1;
+                                if (!isHideUntil) shouldShow = true;
+                                else {
+                                    if (!fields.CD_date?.value) shouldShow = true;
+                                    else {
+                                        const taskDate = new Date(fields.CD_date.value);
+                                        taskDate.setHours(0, 0, 0, 0);
+                                        if (taskDate <= today) shouldShow = true;
+                                    }
+                                }
+                            }
+                        }
+
+                        if (shouldShow) {
+                            if (!taskRecords.find(t => t.recordName === override.recordName)) {
+                                taskRecords.push(override);
+                            }
+                        }
                     } else if (viewMode === 'due') {
                         const fields = override.fields;
                         if (
@@ -1328,6 +1677,26 @@ function ProjectsList() {
                             const taskDate = new Date(fields.CD_date.value);
 
                             if (taskDate <= todayEnd) {
+                                if (!taskRecords.find(t => t.recordName === override.recordName)) {
+                                    taskRecords.push(override);
+                                }
+                            }
+                        }
+                    } else if (viewMode === 'deferred') {
+                        const fields = override.fields;
+                        if (
+                            fields.CD_completed?.value !== 1 &&
+                            fields.CD_someday?.value !== 1 &&
+                            fields.CD_waitingfor?.value !== 1 &&
+                            fields.CD_project?.value &&
+                            fields.CD_dateactive?.value === 1 &&
+                            fields.CD_hideuntildate?.value === 1 &&
+                            fields.CD_date?.value
+                        ) {
+                            const todayEnd = new Date();
+                            todayEnd.setHours(23, 59, 59, 999);
+                            const taskDate = new Date(fields.CD_date.value);
+                            if (taskDate > todayEnd) {
                                 if (!taskRecords.find(t => t.recordName === override.recordName)) {
                                     taskRecords.push(override);
                                 }
@@ -1568,6 +1937,12 @@ function ProjectsList() {
             todayEnd.setHours(23, 59, 59, 999);
             const taskDate = new Date(t.fields.CD_date.value);
             return taskDate <= todayEnd;
+        } else if (viewMode === 'waiting') {
+            // Waiting: Show non-completed tasks (filtered by query)
+            return (t.fields.CD_completed?.value !== 1) || completingTaskIds.has(t.recordName);
+        } else if (viewMode === 'deferred') {
+            // Deferred: Show non-completed tasks (filtered by query)
+            return (t.fields.CD_completed?.value !== 1) || completingTaskIds.has(t.recordName);
         } else {
             // History mode
             return t.fields.CD_completed?.value === 1;
@@ -1788,9 +2163,27 @@ function ProjectsList() {
                             setViewMode('due');
                             setSelectedProject(null);
                         }}
+                        onDragOver={(e) => {
+                            e.preventDefault();
+                            e.dataTransfer.dropEffect = 'move';
+                        }}
+                        onDragEnter={(e) => {
+                            e.preventDefault();
+                            if (dragOverProjectId !== 'due-pseudo-project') {
+                                setDragOverProjectId('due-pseudo-project');
+                            }
+                        }}
+                        onDragLeave={(e) => {
+                            if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                                setDragOverProjectId(null);
+                            }
+                        }}
+                        onDrop={handleDropDue}
                         className={`group flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${viewMode === 'due'
                             ? 'bg-orange-50 text-orange-700'
-                            : 'hover:bg-gray-100 text-gray-700'
+                            : dragOverProjectId === 'due-pseudo-project'
+                                ? 'bg-orange-100 ring-2 ring-orange-300 ring-inset'
+                                : 'hover:bg-gray-100 text-gray-700'
                             }`}
                     >
                         <CalendarClock className={`w-5 h-5 ${viewMode === 'due' ? 'text-orange-500' : 'text-gray-400'}`} />
@@ -1828,6 +2221,70 @@ function ProjectsList() {
                     >
                         <Zap className={`w-5 h-5 ${viewMode === 'next_actions' ? 'text-purple-500' : 'text-gray-400'}`} />
                         <span className="font-medium">Next actions</span>
+                    </div>
+
+                    <div
+                        onClick={() => {
+                            setViewMode('waiting');
+                            setSelectedProject(null);
+                        }}
+                        onDragOver={(e) => {
+                            e.preventDefault();
+                            e.dataTransfer.dropEffect = 'move';
+                        }}
+                        onDragEnter={(e) => {
+                            e.preventDefault();
+                            if (dragOverProjectId !== 'waiting-pseudo-project') {
+                                setDragOverProjectId('waiting-pseudo-project');
+                            }
+                        }}
+                        onDragLeave={(e) => {
+                            if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                                setDragOverProjectId(null);
+                            }
+                        }}
+                        onDrop={handleDropWaiting}
+                        className={`group flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${viewMode === 'waiting'
+                            ? 'bg-indigo-50 text-indigo-700'
+                            : dragOverProjectId === 'waiting-pseudo-project'
+                                ? 'bg-indigo-100 ring-2 ring-indigo-300 ring-inset'
+                                : 'hover:bg-gray-100 text-gray-700'
+                            }`}
+                    >
+                        <Hourglass className={`w-5 h-5 ${viewMode === 'waiting' ? 'text-indigo-500' : 'text-gray-400'}`} />
+                        <span className="font-medium">Waiting for</span>
+                    </div>
+
+                    <div
+                        onClick={() => {
+                            setViewMode('deferred');
+                            setSelectedProject(null);
+                        }}
+                        onDragOver={(e) => {
+                            e.preventDefault();
+                            e.dataTransfer.dropEffect = 'move';
+                        }}
+                        onDragEnter={(e) => {
+                            e.preventDefault();
+                            if (dragOverProjectId !== 'deferred-pseudo-project') {
+                                setDragOverProjectId('deferred-pseudo-project');
+                            }
+                        }}
+                        onDragLeave={(e) => {
+                            if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                                setDragOverProjectId(null);
+                            }
+                        }}
+                        onDrop={handleDropDeferred}
+                        className={`group flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${viewMode === 'deferred'
+                            ? 'bg-teal-50 text-teal-700'
+                            : dragOverProjectId === 'deferred-pseudo-project'
+                                ? 'bg-teal-100 ring-2 ring-teal-300 ring-inset'
+                                : 'hover:bg-gray-100 text-gray-700'
+                            }`}
+                    >
+                        <CalendarDays className={`w-5 h-5 ${viewMode === 'deferred' ? 'text-teal-500' : 'text-gray-400'}`} />
+                        <span className="font-medium">Deferred</span>
                     </div>
 
                     <div
@@ -2348,12 +2805,14 @@ function ProjectsList() {
                                 ? (selectedProject?.fields.CD_name?.value || 'Select a Project')
                                 : viewMode === 'inbox' ? 'Inbox'
                                     : viewMode === 'next_actions' ? 'Next actions'
-                                        : viewMode === 'someday' ? 'Someday / Maybe'
-                                            : viewMode === 'due' ? 'Due and Overdue'
-                                                : 'Completed Tasks'
+                                        : viewMode === 'waiting' ? 'Waiting for'
+                                            : viewMode === 'deferred' ? 'Deferred'
+                                                : viewMode === 'someday' ? 'Someday / Maybe'
+                                                    : viewMode === 'due' ? 'Due and Overdue'
+                                                        : 'Completed Tasks'
                             }
                         </h1>
-                        {(viewMode === 'project' && selectedProject || viewMode === 'inbox' || viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due') && (
+                        {(viewMode === 'project' && selectedProject || viewMode === 'inbox' || viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due' || viewMode === 'waiting' || viewMode === 'deferred') && (
                             <button
                                 onClick={handleCreateTask}
                                 className="p-1 rounded-full text-gray-400 hover:bg-blue-50 hover:text-blue-600 transition-colors"
@@ -2411,14 +2870,14 @@ function ProjectsList() {
                             {visibleTasks.map(task => (
                                 <div
                                     key={task.recordName}
-                                    draggable={(viewMode === 'project' || viewMode === 'inbox' || viewMode === 'next_actions' || viewMode === 'someday') && editingTaskId !== task.recordName} // Enable drag for Project, Inbox, Next Actions, Someday
+                                    draggable={(viewMode === 'project' || viewMode === 'inbox' || viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'waiting' || viewMode === 'deferred' || viewMode === 'due') && editingTaskId !== task.recordName} // Enable drag for Project, Inbox, Next Actions, Someday, Waiting, Deferred, Due
                                     onDragStart={(e) => handleDragStart(e, task, 'task')}
                                     // Drop Handlers for Reordering
                                     onDragOver={handleTaskDragOver}
                                     onDragEnter={() => handleTaskDragEnter(task)}
                                     onDragLeave={handleTaskDragLeave}
                                     onDrop={(e) => handleTaskDrop(e, task)}
-                                    className={`group p-4 bg-white border border-gray-100 rounded-xl hover:shadow-sm transition-all flex items-center gap-3 ${(viewMode === 'project' || viewMode === 'inbox' || viewMode === 'next_actions' || viewMode === 'someday') ? 'cursor-grab active:cursor-grabbing hover:border-blue-100' : 'opacity-75'
+                                    className={`group p-4 bg-white border border-gray-100 rounded-xl hover:shadow-sm transition-all flex items-center gap-3 ${(viewMode === 'project' || viewMode === 'inbox' || viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'waiting' || viewMode === 'deferred' || viewMode === 'due') ? 'cursor-grab active:cursor-grabbing hover:border-blue-100' : 'opacity-75'
                                         } ${dragOverTaskId === task.recordName
                                             ? 'border-blue-400 border-t-4 border-t-blue-500' // Visual cue (insert above style) 
                                             : ''
@@ -2468,8 +2927,8 @@ function ProjectsList() {
                                                     {task.fields.CD_recurring?.value === 1 && <span title="Recurring" className="text-blue-400"><Repeat className="w-3 h-3" /></span>}
                                                 </div>
 
-                                                {/* Show actions in Project Mode, Inbox Mode, Next Actions Mode, Someday Mode */}
-                                                {(viewMode === 'project' || viewMode === 'inbox' || viewMode === 'next_actions' || viewMode === 'someday') && (
+                                                {/* Show actions in Project Mode, Inbox Mode, Next Actions Mode, Someday Mode, Waiting Mode, Deferred Mode, Due Mode */}
+                                                {(viewMode === 'project' || viewMode === 'inbox' || viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'waiting' || viewMode === 'deferred' || viewMode === 'due') && (
                                                     <div className="flex items-center ml-auto opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
                                                         <button
                                                             onClick={() => handleInsertTask(task)}
