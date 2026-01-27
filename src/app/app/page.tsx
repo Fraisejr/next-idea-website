@@ -28,7 +28,7 @@ function ProjectsList() {
     const [taskError, setTaskError] = useState<string | null>(null);
 
     // View Mode
-    const [viewMode, setViewMode] = useState<'project' | 'history' | 'inbox' | 'next_actions' | 'someday'>('project'); // Default to project, or could default to inbox?
+    const [viewMode, setViewMode] = useState<'project' | 'history' | 'inbox' | 'next_actions' | 'someday' | 'due'>('project'); // Default to project, or could default to inbox?
     const [completingTaskIds, setCompletingTaskIds] = useState<Set<string>>(new Set());
 
     // Details Panel State
@@ -239,7 +239,7 @@ function ProjectsList() {
                 console.log('[CloudKit Sync] Creating new task with recordName:', recordName);
 
                 // Find Single Actions project for Next Actions view or Someday view
-                const singleActionsProject = (viewMode === 'next_actions' || viewMode === 'someday')
+                const singleActionsProject = (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due')
                     ? projects.find(p => p.fields.CD_singleactions?.value === 1)
                     : null;
 
@@ -249,11 +249,12 @@ function ProjectsList() {
                     fields: {
                         CD_name: { value: editTaskName },
                         CD_id: { value: crypto.randomUUID() },
-                        // Inbox: omit project. Next Actions/Someday: use Single Actions project. Project mode: use selectedProject.
+                        // Inbox: omit project. Next Actions/Someday/Due: use Single Actions project. Project mode: use selectedProject.
                         ...(viewMode === 'inbox' ? {}
-                            : (viewMode === 'next_actions' || viewMode === 'someday') ? { CD_project: { value: singleActionsProject?.recordName || '' } }
+                            : (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due') ? { CD_project: { value: singleActionsProject?.recordName || '' } }
                                 : { CD_project: { value: selectedProject?.recordName || '' } }),
                         ...(viewMode === 'someday' ? { CD_someday: { value: 1 } } : {}),
+                        ...(viewMode === 'due' ? { CD_date: { value: Date.now() } } : {}), // Default to Today
                         CD_completed: { value: 0 },
                         // Use the order we set in the local state object
                         CD_order: { value: task.fields.CD_order?.value || 0 },
@@ -322,10 +323,10 @@ function ProjectsList() {
     };
 
     const handleCreateTask = () => {
-        if ((!selectedProject && viewMode !== 'inbox' && viewMode !== 'next_actions' && viewMode !== 'someday') || editingTaskId) return; // Don't start if already editing
+        if ((!selectedProject && viewMode !== 'inbox' && viewMode !== 'next_actions' && viewMode !== 'someday' && viewMode !== 'due') || editingTaskId) return; // Don't start if already editing
 
         // Find Single Actions project for Next Actions view or Someday view
-        const singleActionsProject = (viewMode === 'next_actions' || viewMode === 'someday')
+        const singleActionsProject = (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due')
             ? projects.find(p => p.fields.CD_singleactions?.value === 1)
             : null;
 
@@ -338,7 +339,7 @@ function ProjectsList() {
                 CD_id: { value: 'new-task' },
                 // Inbox: omit project. Next Actions/Someday: use Single Actions project. Project mode: use selectedProject.
                 ...(viewMode === 'inbox' ? {}
-                    : (viewMode === 'next_actions' || viewMode === 'someday') ? { CD_project: { value: singleActionsProject?.recordName || '' } }
+                    : (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due') ? { CD_project: { value: singleActionsProject?.recordName || '' } }
                         : { CD_project: { value: selectedProject?.recordName || '' } }),
                 ...(viewMode === 'someday' ? { CD_someday: { value: 1 } } : {}),
                 CD_completed: { value: 0 },
@@ -352,7 +353,7 @@ function ProjectsList() {
     };
 
     const handleInsertTask = async (afterTask: TaskRecord) => {
-        if ((!selectedProject && viewMode !== 'inbox' && viewMode !== 'next_actions' && viewMode !== 'someday') || editingTaskId || !container) return;
+        if ((!selectedProject && viewMode !== 'inbox' && viewMode !== 'next_actions' && viewMode !== 'someday' && viewMode !== 'due') || editingTaskId || !container) return;
 
         // Find index of afterTask
         const index = tasks.findIndex(t => t.recordName === afterTask.recordName);
@@ -389,7 +390,7 @@ function ProjectsList() {
         });
 
         // Find Single Actions project for Next Actions view or Someday view
-        const singleActionsProject = (viewMode === 'next_actions' || viewMode === 'someday')
+        const singleActionsProject = (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due')
             ? projects.find(p => p.fields.CD_singleactions?.value === 1)
             : null;
 
@@ -403,7 +404,7 @@ function ProjectsList() {
                 CD_id: { value: crypto.randomUUID() }, // Client-side UUID for new task
                 // Inbox: omit project. Next Actions/Someday: use Single Actions project. Project mode: use selectedProject.
                 ...(viewMode === 'inbox' ? {}
-                    : (viewMode === 'next_actions' || viewMode === 'someday') ? { CD_project: { value: singleActionsProject?.recordName || '' } }
+                    : (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due') ? { CD_project: { value: singleActionsProject?.recordName || '' } }
                         : { CD_project: { value: selectedProject?.recordName || '' } }),
                 ...(viewMode === 'someday' ? { CD_someday: { value: 1 } } : {}),
                 CD_completed: { value: 0 },
@@ -441,9 +442,9 @@ function ProjectsList() {
 
     // Create task at top
     const handleCreateTaskAtTop = () => {
-        if ((!selectedProject && viewMode !== 'inbox' && viewMode !== 'next_actions' && viewMode !== 'someday') || editingTaskId) return;
+        if ((!selectedProject && viewMode !== 'inbox' && viewMode !== 'next_actions' && viewMode !== 'someday' && viewMode !== 'due') || editingTaskId) return;
 
-        const singleActionsProject = (viewMode === 'next_actions' || viewMode === 'someday')
+        const singleActionsProject = (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due')
             ? projects.find(p => p.fields.CD_singleactions?.value === 1)
             : null;
 
@@ -455,7 +456,7 @@ function ProjectsList() {
                 CD_name: { value: '' },
                 CD_id: { value: 'new-task' },
                 ...(viewMode === 'inbox' ? {}
-                    : (viewMode === 'next_actions' || viewMode === 'someday') ? { CD_project: { value: singleActionsProject?.recordName || '' } }
+                    : (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due') ? { CD_project: { value: singleActionsProject?.recordName || '' } }
                         : { CD_project: { value: selectedProject?.recordName || '' } }),
                 ...(viewMode === 'someday' ? { CD_someday: { value: 1 } } : {}),
                 CD_completed: { value: 0 },
@@ -1094,8 +1095,8 @@ function ProjectsList() {
                         desiredKeys: ['CD_name', 'CD_id', 'CD_order', 'CD_project', 'CD_completed', 'CD_modifieddate', 'CD_hideuntildate'],
                         resultsLimit: 100
                     };
-                } else if (viewMode === 'next_actions' || viewMode === 'someday') {
-                    // Next Actions & Someday: Fetch all active tasks, extensive client-side filtering
+                } else if (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due') {
+                    // Next Actions & Someday & Due: Fetch all active tasks, extensive client-side filtering
                     query = {
                         recordType: 'CD_Task',
                         filterBy: [{
@@ -1208,6 +1209,24 @@ function ProjectsList() {
                         }
                         return true;
                     });
+                } else if (viewMode === 'due') {
+                    taskRecords = taskRecords.filter(t => {
+                        const fields = t.fields;
+
+                        // 1. Must not be completed
+                        if (fields.CD_completed?.value === 1) return false;
+
+                        // 2. Must have a date set AND be active
+                        if (!fields.CD_date?.value) return false;
+                        if (fields.CD_dateactive?.value !== 1) return false;
+
+                        // 3. Date must be <= END of Today
+                        const todayEnd = new Date();
+                        todayEnd.setHours(23, 59, 59, 999);
+                        const taskDate = new Date(fields.CD_date.value);
+
+                        return taskDate <= todayEnd;
+                    });
                 }
 
                 // 3. Append missing records from optimisticTasks that BELONG to this view
@@ -1297,6 +1316,23 @@ function ProjectsList() {
                                 taskRecords.push(override);
                             }
                         }
+                    } else if (viewMode === 'due') {
+                        const fields = override.fields;
+                        if (
+                            fields.CD_completed?.value !== 1 &&
+                            fields.CD_date?.value &&
+                            fields.CD_dateactive?.value === 1
+                        ) {
+                            const todayEnd = new Date();
+                            todayEnd.setHours(23, 59, 59, 999);
+                            const taskDate = new Date(fields.CD_date.value);
+
+                            if (taskDate <= todayEnd) {
+                                if (!taskRecords.find(t => t.recordName === override.recordName)) {
+                                    taskRecords.push(override);
+                                }
+                            }
+                        }
                     }
                 });
                 // ------------------------
@@ -1323,7 +1359,7 @@ function ProjectsList() {
         };
 
         console.log('[CloudKit Sync] 🚀 Setting up polling interval');
-        fetchTasks();
+        fetchTasks(true);
 
         if (!editingTaskId && !editingId) {
             // Poll every 10 seconds to keep fresh
@@ -1522,6 +1558,16 @@ function ProjectsList() {
         } else if (viewMode === 'someday') {
             // Someday: Show non-completed tasks
             return (t.fields.CD_completed?.value !== 1) || completingTaskIds.has(t.recordName);
+        } else if (viewMode === 'due') {
+            // Due: Show non-completed tasks with date <= Today
+            if (t.fields.CD_completed?.value === 1 && !completingTaskIds.has(t.recordName)) return false;
+            if (!t.fields.CD_date?.value) return false;
+            if (t.fields.CD_dateactive?.value !== 1) return false;
+
+            const todayEnd = new Date();
+            todayEnd.setHours(23, 59, 59, 999);
+            const taskDate = new Date(t.fields.CD_date.value);
+            return taskDate <= todayEnd;
         } else {
             // History mode
             return t.fields.CD_completed?.value === 1;
@@ -1735,6 +1781,20 @@ function ProjectsList() {
                     >
                         <Inbox className="w-5 h-5 text-blue-500" />
                         <span className="font-medium">Inbox</span>
+                    </div>
+
+                    <div
+                        onClick={() => {
+                            setViewMode('due');
+                            setSelectedProject(null);
+                        }}
+                        className={`group flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${viewMode === 'due'
+                            ? 'bg-orange-50 text-orange-700'
+                            : 'hover:bg-gray-100 text-gray-700'
+                            }`}
+                    >
+                        <CalendarClock className={`w-5 h-5 ${viewMode === 'due' ? 'text-orange-500' : 'text-gray-400'}`} />
+                        <span className="font-medium">Due and Overdue</span>
                     </div>
 
                     <div
@@ -2289,10 +2349,11 @@ function ProjectsList() {
                                 : viewMode === 'inbox' ? 'Inbox'
                                     : viewMode === 'next_actions' ? 'Next actions'
                                         : viewMode === 'someday' ? 'Someday / Maybe'
-                                            : 'Completed Tasks'
+                                            : viewMode === 'due' ? 'Due and Overdue'
+                                                : 'Completed Tasks'
                             }
                         </h1>
-                        {(viewMode === 'project' && selectedProject || viewMode === 'inbox' || viewMode === 'next_actions' || viewMode === 'someday') && (
+                        {(viewMode === 'project' && selectedProject || viewMode === 'inbox' || viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due') && (
                             <button
                                 onClick={handleCreateTask}
                                 className="p-1 rounded-full text-gray-400 hover:bg-blue-50 hover:text-blue-600 transition-colors"
