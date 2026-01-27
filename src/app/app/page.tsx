@@ -890,6 +890,14 @@ function ProjectsList() {
                 updates.CD_waitingfor = { value: 0 };
             }
 
+            // Remove date constraints to make task immediately available
+            if (taskRecord.fields.CD_dateactive?.value === 1) {
+                updates.CD_dateactive = { value: 0 };
+            }
+            if (taskRecord.fields.CD_hideuntildate?.value === 1) {
+                updates.CD_hideuntildate = { value: 0 };
+            }
+
             // Apply updates to task record
             Object.assign(taskRecord.fields, updates);
 
