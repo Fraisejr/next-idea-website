@@ -10,6 +10,7 @@ export const CLOUDKIT_ENV = 'development';
 // Type definition based on user schema
 export interface ProjectRecord {
     recordName: string;
+    recordChangeTag?: string;
     recordType: 'CD_Project';
     fields: {
         CD_name: { value: string };
@@ -17,6 +18,7 @@ export interface ProjectRecord {
         CD_order?: { value: number };
         CD_completed?: { value: number }; // 0 for false, 1 for true
         CD_singleactions?: { value: number }; // 0 for false, 1 for true
+        CD_focus?: { value: number }; // 0 for false, 1 for true
     };
 }
 
@@ -40,6 +42,7 @@ export interface TaskRecord {
         CD_reminderactive?: { value: number }; // 0/1
         CD_recurrence?: { value: number }; // Int16
         CD_recurrencetype?: { value: string }; // String
+        CD_hideuntildate?: { value: number }; // 0/1
     };
 }
 
