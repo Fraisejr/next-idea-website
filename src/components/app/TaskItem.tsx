@@ -9,8 +9,7 @@ import {
     Moon,
     Repeat,
     Plus,
-    Pencil,
-    ChevronRight
+    Info // Imported Info
 } from 'lucide-react';
 import React from 'react';
 
@@ -90,15 +89,15 @@ export const TaskItem: React.FC<TaskItemProps> = ({
             onDragEnter={() => onDragEnter(task)}
             onDragLeave={onDragLeave}
             onDrop={(e) => onDrop(e, task)}
-            className={`group p-4 bg-white border border-gray-100 rounded-xl hover:shadow-sm transition-all flex items-center gap-3 ${canDrag ? 'cursor-grab active:cursor-grabbing hover:border-blue-100' : 'opacity-75'
+            className={`group p-3 bg-white border border-gray-100 rounded-xl hover:shadow-sm transition-all flex items-center gap-3 ${canDrag ? 'cursor-grab active:cursor-grabbing hover:border-blue-100' : 'opacity-75'
                 } ${dragOverTaskId === task.recordName
-                    ? 'border-blue-400 border-t-4 border-t-blue-500' // Visual cue (insert above style) 
+                    ? 'border-blue-400 border-t-4 border-t-blue-500'
                     : ''
                 }`}
         >
             <div
                 className={`w-5 h-5 rounded-full border-2 cursor-pointer flex items-center justify-center transition-colors ${task.fields.CD_completed?.value === 1
-                    ? 'bg-green-500 border-green-500' // Visual "checked" state
+                    ? 'bg-green-500 border-green-500'
                     : 'border-gray-300 hover:border-blue-400'
                     }`}
                 onClick={() => onToggleComplete(task)}
@@ -109,7 +108,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                 )}
             </div>
 
-            <div className="flex-1 min-w-0" onClick={() => onTaskClick(task)}>
+            <div className="flex-1 min-w-0" onClick={() => onEditClick(task)}>
                 {editingTaskId === task.recordName ? (
                     <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                         <input
@@ -127,11 +126,11 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                         <button onClick={() => onCancel()} className="text-red-600 p-1 hover:bg-red-50 rounded"><X className="w-4 h-4" /></button>
                     </div>
                 ) : (
-                    <div className="flex items-center justify-between w-full relative cursor-pointer">
+                    <div className="flex items-center w-full relative cursor-pointer">
                         <span className={`text-gray-900 ${task.fields.CD_completed?.value === 1 ? 'line-through text-gray-400' : ''}`}>
                             {task.fields.CD_name?.value}
                         </span>
-                        {/* Meta Icons (Mini badges) */}
+                        {/* Meta Icons */}
                         <div className="flex items-center gap-1 ml-2">
                             {task.fields.CD_date?.value && task.fields.CD_dateactive?.value === 1 ? (() => {
                                 const { text, className } = formatDate(task.fields.CD_date.value);
@@ -147,23 +146,24 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                             {task.fields.CD_recurring?.value === 1 && <span title="Recurring" className="text-blue-400"><Repeat className="w-3 h-3" /></span>}
                         </div>
 
-                        {/* Show actions */}
+                        {/* Actions: Right next to name/meta, larger icons */}
                         {showActions && (
-                            <div className="flex items-center ml-auto opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex items-center gap-1 ml-2 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
                                 <button
-                                    onClick={() => onInsertTask(task)}
-                                    className="p-1 mr-1 text-gray-400 hover:text-green-600 rounded"
+                                    onClick={(e) => { e.stopPropagation(); onInsertTask(task); }}
+                                    className="p-1.5 text-green-600 bg-green-50 hover:bg-green-100 rounded-lg cursor-pointer"
                                     title="Insert Task Below"
                                 >
-                                    <Plus className="w-3.5 h-3.5" />
+                                    <Plus className="w-4 h-4" />
                                 </button>
+
                                 <button
-                                    onClick={() => onEditClick(task)}
-                                    className="p-1 text-gray-400 hover:text-blue-600 rounded"
+                                    onClick={(e) => { e.stopPropagation(); onTaskClick(task); }}
+                                    className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg ml-0.5 cursor-pointer"
+                                    title="Task Details"
                                 >
-                                    <Pencil className="w-3.5 h-3.5" />
+                                    <Info className="w-4 h-4" />
                                 </button>
-                                <ChevronRight className="w-4 h-4 text-gray-300" />
                             </div>
                         )}
                         {/* Show different actions or Project Name in History Mode? */}

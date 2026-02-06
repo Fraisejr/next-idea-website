@@ -10,10 +10,24 @@ import { Sidebar } from '@/components/app/Sidebar';
 import { TaskSection } from '@/components/app/TaskSection';
 import { Loader2, ListTodo, CheckCircle2, Pencil, Check, X, ClipboardList, Plus, Clock, RotateCcw, Calendar, Hourglass, Repeat, Moon, ChevronRight, Zap, Inbox, Keyboard, CalendarClock, CalendarDays } from 'lucide-react';
 
-const getTaskSection = (task: TaskRecord): 'nextActions' | 'waitingFor' | 'deferred' | 'somedayMaybe' => {
+// Helper to categorize tasks
+const getTaskSection = (task: TaskRecord): 'due' | 'nextActions' | 'waitingFor' | 'deferred' | 'somedayMaybe' => {
+    // Priority 1: Due/Overdue (has active date)
+    if (task.fields.CD_dateactive?.value === 1 && task.fields.CD_date?.value) return 'due';
+
+    // Priority 2: Waiting For
     if (task.fields.CD_waitingfor?.value === 1) return 'waitingFor';
+
+    // Priority 3: Someday/Maybe
     if (task.fields.CD_someday?.value === 1) return 'somedayMaybe';
+
+    // Priority 4: Deferred (Hidden until date)
+    // Note: If it's deferred AND has an active date, it might fall under priority 1 or 4 depending on logic.
+    // Usually 'Deferred' implies it's hidden from Next Actions but not necessarily "Due" in the sense of a deadline?
+    // User request: "Due and overdue tasks".
+    // If CD_hideuntildate is 1, it's deferred.
     if (task.fields.CD_hideuntildate?.value === 1 && task.fields.CD_date?.value && task.fields.CD_date.value > Date.now()) return 'deferred';
+
     return 'nextActions';
 };
 
@@ -1851,6 +1865,7 @@ function ProjectsList() {
     const sections = useMemo(() => {
         if (viewMode !== 'project') return null;
 
+        const due: TaskRecord[] = [];
         const nextActions: TaskRecord[] = [];
         const waitingFor: TaskRecord[] = [];
         const deferred: TaskRecord[] = [];
@@ -1858,13 +1873,17 @@ function ProjectsList() {
 
         visibleTasks.forEach(t => {
             const section = getTaskSection(t);
-            if (section === 'waitingFor') waitingFor.push(t);
+            if (section === 'due') due.push(t);
+            else if (section === 'waitingFor') waitingFor.push(t);
             else if (section === 'somedayMaybe') somedayMaybe.push(t);
             else if (section === 'deferred') deferred.push(t);
             else nextActions.push(t);
         });
 
-        return { nextActions, waitingFor, deferred, someday: somedayMaybe };
+        // Ensure tasks within due are sorted by date
+        due.sort((a, b) => (a.fields.CD_date?.value || 0) - (b.fields.CD_date?.value || 0));
+
+        return { due, nextActions, waitingFor, deferred, someday: somedayMaybe };
     }, [visibleTasks, viewMode]);
 
     // Details Side Panel Handlers
@@ -2427,6 +2446,10 @@ function ProjectsList() {
                         <div className="space-y-6">
                             {viewMode === 'project' && sections ? (
                                 <>
+                                    <TaskSection title="Due / Overdue" count={sections.due.length}>
+                                        {renderTaskList(sections.due)}
+                                    </TaskSection>
+
                                     <TaskSection title="Next Actions" count={sections.nextActions.length}>
                                         {renderTaskList(sections.nextActions)}
                                     </TaskSection>
