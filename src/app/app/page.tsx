@@ -34,8 +34,46 @@ function ProjectsList() {
     // Details Panel State
     const [selectedTaskDetails, setSelectedTaskDetails] = useState<TaskRecord | null>(null);
 
-    // Optimistic State Cache (to handle query latency)
-    const [optimisticTasks, setOptimisticTasks] = useState<Record<string, TaskRecord>>({});
+    // ============ TASK CACHE SYSTEM ============
+    // Global cache for all active (non-completed) tasks
+    const [allTasksCache, setAllTasksCache] = useState<Record<string, TaskRecord>>({});
+    const [cacheInitialized, setCacheInitialized] = useState(false);
+    const [lastCacheRefresh, setLastCacheRefresh] = useState<number>(0);
+    const CACHE_REFRESH_INTERVAL = 15000; // 15 seconds
+    const LOCALSTORAGE_CACHE_KEY = 'next-idea-task-cache';
+    const LOCALSTORAGE_TIMESTAMP_KEY = 'next-idea-cache-timestamp';
+
+    // Helper: Update cache and localStorage
+    const updateTaskCache = (updater: (prev: Record<string, TaskRecord>) => Record<string, TaskRecord>) => {
+        setAllTasksCache(prev => {
+            const updated = updater(prev);
+            // Persist to localStorage
+            try {
+                localStorage.setItem(LOCALSTORAGE_CACHE_KEY, JSON.stringify(updated));
+                localStorage.setItem(LOCALSTORAGE_TIMESTAMP_KEY, Date.now().toString());
+            } catch (error) {
+                console.warn('[Cache] Failed to persist to localStorage:', error);
+            }
+            return updated;
+        });
+    };
+
+    // Helper: Add or update a single task in cache
+    const upsertTaskInCache = (task: TaskRecord) => {
+        updateTaskCache(prev => ({
+            ...prev,
+            [task.recordName]: task
+        }));
+    };
+
+    // Helper: Remove a task from cache
+    const removeTaskFromCache = (recordName: string) => {
+        updateTaskCache(prev => {
+            const updated = { ...prev };
+            delete updated[recordName];
+            return updated;
+        });
+    };
 
     // Keyboard Shortcuts Modal
     const [showShortcuts, setShowShortcuts] = useState(false);
@@ -288,11 +326,8 @@ function ProjectsList() {
                     } : t
                 ));
 
-                // Add to optimistic tasks to prevent flickering on next poll/fetch
-                setOptimisticTasks(prev => ({
-                    ...prev,
-                    [savedRecord.recordName]: savedRecord
-                }));
+                // Add to cache to prevent flickering and enable instant view switching
+                upsertTaskInCache(savedRecord);
 
                 setEditingTaskId(null);
                 setEditTaskName('');
@@ -647,6 +682,163 @@ function ProjectsList() {
         }
     }, [isAuthenticated, container]); // Run once on auth
 
+    // ========== CACHE INITIALIZATION & REFRESH ==========
+    // Initialize cache from localStorage and fetch all tasks on authentication
+    useEffect(() => {
+        const initializeCache = async () => {
+            if (!container || !isAuthenticated) return;
+
+            console.log('[Cache] 🚀 Initializing task cache...');
+
+            // 1. Hydrate from localStorage first for instant display
+            try {
+                const cachedData = localStorage.getItem(LOCALSTORAGE_CACHE_KEY);
+                const cachedTimestamp = localStorage.getItem(LOCALSTORAGE_TIMESTAMP_KEY);
+
+                if (cachedData) {
+                    const parsed = JSON.parse(cachedData);
+                    setAllTasksCache(parsed);
+                    setLastCacheRefresh(cachedTimestamp ? parseInt(cachedTimestamp) : 0);
+                    console.log(`[Cache] ✅ Hydrated ${Object.keys(parsed).length} tasks from localStorage`);
+                }
+            } catch (error) {
+                console.warn('[Cache] Failed to hydrate from localStorage:', error);
+                localStorage.removeItem(LOCALSTORAGE_CACHE_KEY);
+                localStorage.removeItem(LOCALSTORAGE_TIMESTAMP_KEY);
+            }
+
+            // 2. Fetch all active tasks from CloudKit to populate/refresh cache
+            try {
+                const privateDB = container.privateCloudDatabase;
+                const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
+
+                const query = {
+                    recordType: 'CD_Task',
+                    filterBy: [{
+                        fieldName: 'CD_completed',
+                        comparator: 'NOT_EQUALS',
+                        fieldValue: { value: 1 }
+                    }],
+                    desiredKeys: [
+                        'CD_name', 'CD_id', 'CD_order', 'CD_project', 'CD_completed',
+                        'CD_someday', 'CD_waitingfor', 'CD_dateactive',
+                        'CD_date', 'CD_hideuntildate', 'CD_recurring', 'CD_recurrence', 'CD_recurrencetype',
+                        'CD_modifieddate'
+                    ],
+                    resultsLimit: 500 // Fetch all active tasks
+                };
+
+                console.log('[Cache] Fetching all active tasks from CloudKit...');
+                const result = await privateDB.performQuery(query, { zoneID });
+
+                if (result.hasErrors) {
+                    console.error('[Cache] ❌ Failed to fetch tasks:', result.errors);
+                    throw new Error(result.errors[0].message);
+                }
+
+                const tasks = result.records as TaskRecord[];
+                console.log(`[Cache] ✅ Fetched ${tasks.length} active tasks from CloudKit`);
+
+                // Build cache object indexed by recordName
+                const cacheObject: Record<string, TaskRecord> = {};
+                tasks.forEach(task => {
+                    cacheObject[task.recordName] = task;
+                });
+
+                // Update cache and localStorage
+                updateTaskCache(() => cacheObject);
+                setLastCacheRefresh(Date.now());
+                setCacheInitialized(true);
+
+                console.log('[Cache] 🎉 Cache initialization complete');
+            } catch (error: any) {
+                console.error('[Cache] ❌ Initialization failed:', error);
+                // Still mark as initialized to prevent infinite loops
+                setCacheInitialized(true);
+            }
+        };
+
+        if (!cacheInitialized) {
+            initializeCache();
+        }
+    }, [container, isAuthenticated, cacheInitialized]);
+
+    // Background refresh every 15 seconds (paused during editing)
+    useEffect(() => {
+        if (!container || !isAuthenticated || !cacheInitialized) return;
+
+        // PAUSE refresh if user is editing a task to prevent overwriting their changes
+        if (editingTaskId || editingId) {
+            console.log('[Cache] ⏸️ Background refresh paused during editing');
+            return;
+        }
+
+        const refreshCache = async () => {
+            const now = Date.now();
+            if (now - lastCacheRefresh < CACHE_REFRESH_INTERVAL) return;
+
+            console.log('[Cache] 🔄 Background refresh started...');
+
+            try {
+                const privateDB = container.privateCloudDatabase;
+                const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
+
+                const query = {
+                    recordType: 'CD_Task',
+                    filterBy: [{
+                        fieldName: 'CD_completed',
+                        comparator: 'NOT_EQUALS',
+                        fieldValue: { value: 1 }
+                    }],
+                    desiredKeys: [
+                        'CD_name', 'CD_id', 'CD_order', 'CD_project', 'CD_completed',
+                        'CD_someday', 'CD_waitingfor', 'CD_dateactive',
+                        'CD_date', 'CD_hideuntildate', 'CD_recurring', 'CD_recurrence', 'CD_recurrencetype',
+                        'CD_modifieddate'
+                    ],
+                    resultsLimit: 500
+                };
+                const result = await privateDB.performQuery(query, { zoneID });
+                if (result.hasErrors) throw new Error(result.errors[0].message);
+
+                const tasks = result.records as TaskRecord[];
+                const freshTaskIds = new Set(tasks.map(t => t.recordName));
+
+                // MERGE with existing cache instead of replacing
+                // This preserves any tasks being created/edited that haven't been saved yet
+                updateTaskCache(prev => {
+                    const merged = { ...prev }; // Start with existing cache
+
+                    // Update with fresh data from CloudKit
+                    tasks.forEach(task => {
+                        merged[task.recordName] = task;
+                    });
+
+                    // Remove tasks that disappeared from CloudKit (likely completed on another device)
+                    // But keep tasks that are currently being edited locally
+                    Object.keys(merged).forEach(recordName => {
+                        if (!freshTaskIds.has(recordName) && recordName !== editingTaskId && recordName !== 'new-task') {
+                            console.log(`[Cache] 🗑️ Removing task ${recordName} (no longer in CloudKit, likely completed elsewhere)`);
+                            delete merged[recordName];
+                        }
+                    });
+
+                    return merged;
+                });
+                setLastCacheRefresh(now);
+                console.log(`[Cache] ✅ Refreshed ${tasks.length} tasks (merged with existing cache)`);
+            } catch (error) {
+                console.error('[Cache] ❌ Background refresh failed:', error);
+            }
+        };
+
+        // Refresh immediately if stale, then set up interval
+        refreshCache();
+        const intervalId = setInterval(refreshCache, CACHE_REFRESH_INTERVAL);
+
+        return () => clearInterval(intervalId);
+    }, [container, isAuthenticated, cacheInitialized, lastCacheRefresh, editingTaskId, editingId]);
+
     // Drag and Drop Handlers
     const [dragOverProjectId, setDragOverProjectId] = useState<string | null>(null);
     const [dragOverPosition, setDragOverPosition] = useState<'top' | 'bottom' | null>(null);
@@ -832,12 +1024,9 @@ function ProjectsList() {
             const saveResult = await privateDB.saveRecords([taskRecord], { zoneID });
             if (saveResult.hasErrors) throw new Error(saveResult.errors[0].message);
 
-            // 4. Update Optimistic Cache
+            // 4. Update Cache
             const savedRecord = saveResult.records[0];
-            setOptimisticTasks(prev => ({
-                ...prev,
-                [savedRecord.recordName]: savedRecord
-            }));
+            upsertTaskInCache(savedRecord);
 
             console.log('Task reassigned successfully');
 
@@ -905,12 +1094,9 @@ function ProjectsList() {
             const saveResult = await privateDB.saveRecords([taskRecord], { zoneID });
             if (saveResult.hasErrors) throw new Error(saveResult.errors[0].message);
 
-            // 4. Update Optimistic Cache
+            // 4. Update Cache
             const savedRecord = saveResult.records[0];
-            setOptimisticTasks(prev => ({
-                ...prev,
-                [savedRecord.recordName]: savedRecord
-            }));
+            upsertTaskInCache(savedRecord);
 
             console.log('Task moved to Next Actions successfully');
 
@@ -980,12 +1166,9 @@ function ProjectsList() {
             const saveResult = await privateDB.saveRecords([taskRecord], { zoneID });
             if (saveResult.hasErrors) throw new Error(saveResult.errors[0].message);
 
-            // 4. Update Optimistic Cache
+            // 4. Update Cache
             const savedRecord = saveResult.records[0];
-            setOptimisticTasks(prev => ({
-                ...prev,
-                [savedRecord.recordName]: savedRecord
-            }));
+            upsertTaskInCache(savedRecord);
 
             console.log('Task moved to Waiting for successfully');
 
@@ -1068,10 +1251,7 @@ function ProjectsList() {
 
             // 4. Update Cache
             const savedRecord = saveResult.records[0];
-            setOptimisticTasks(prev => ({
-                ...prev,
-                [savedRecord.recordName]: savedRecord
-            }));
+            upsertTaskInCache(savedRecord);
 
             console.log('Task moved to Deferred successfully');
 
@@ -1148,10 +1328,7 @@ function ProjectsList() {
 
             // 4. Update Cache
             const savedRecord = saveResult.records[0];
-            setOptimisticTasks(prev => ({
-                ...prev,
-                [savedRecord.recordName]: savedRecord
-            }));
+            upsertTaskInCache(savedRecord);
 
             console.log('Task moved to Due successfully');
 
@@ -1198,9 +1375,9 @@ function ProjectsList() {
             const saveResult = await privateDB.saveRecords([taskRecord], { zoneID });
             if (saveResult.hasErrors) throw new Error(saveResult.errors[0].message);
 
-            // 4. Optimistic
+            // 4. Update Cache
             const savedRecord = saveResult.records[0];
-            setOptimisticTasks(prev => ({ ...prev, [savedRecord.recordName]: savedRecord }));
+            upsertTaskInCache(savedRecord);
 
             console.log('Task moved to Someday successfully');
         } catch (err: any) {
@@ -1295,460 +1472,149 @@ function ProjectsList() {
         }
     };
 
-    // Fetch Tasks logic
+    // ========== CACHE-FIRST VIEW FILTERING ==========
+    // Filter tasks from cache based on current view/project - NO CloudKit fetches!
     useEffect(() => {
-        // If we are currently editing/creating a task (editingTaskId) or a project (editingId),
-        // we pause polling to prevent overwriting local state with server data.
-        if (editingTaskId || editingId) {
-            console.log('[CloudKit Sync] ⏸️ Edit active, pausing polling');
+        // Wait for cache to be initialized
+        if (!cacheInitialized) {
+            console.log('[View Filter] ⏳ Waiting for cache initialization...');
+            setLoadingTasks(true);
             return;
         }
 
-        const fetchTasks = async (isPoll = false) => {
-            if (!container) {
-                console.log('[CloudKit Sync] Container not available, skipping fetch');
-                return;
-            }
-
-            // If in project mode but no project selected, clear tasks
-            if (viewMode === 'project' && !selectedProject) {
-                console.log('[CloudKit Sync] No project selected in project mode, clearing tasks');
-                setTasks([]);
-                return;
-            }
-
-            const timestamp = new Date().toLocaleTimeString();
-            console.log(`[CloudKit Sync] ${isPoll ? '🔄 Polling' : '📥 Initial fetch'} started at ${timestamp}`);
-            console.log(`[CloudKit Sync] View mode: ${viewMode}`, selectedProject ? `Project: ${selectedProject.fields.CD_name?.value}` : '');
-
-            if (!isPoll) setLoadingTasks(true);
-            try {
-                const privateDB = container.privateCloudDatabase;
-                const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
-
-                let query: any;
-
-                if (viewMode === 'project' && selectedProject) {
-                    query = {
-                        recordType: 'CD_Task',
-                        filterBy: [{
-                            fieldName: 'CD_project',
-                            comparator: 'EQUALS',
-                            fieldValue: { value: selectedProject.recordName }
-                        }],
-                        desiredKeys: ['CD_name', 'CD_id', 'CD_order', 'CD_project', 'CD_completed', 'CD_hideuntildate'],
-                        resultsLimit: 200
-                    };
-                } else if (viewMode === 'inbox') {
-                    // Inbox: Fetch all active tasks, filter locally for no project.
-                    // This handles cases where project is empty string OR null/missing.
-                    query = {
-                        recordType: 'CD_Task',
-                        filterBy: [
-                            {
-                                fieldName: 'CD_completed',
-                                comparator: 'NOT_EQUALS',
-                                fieldValue: { value: 1 }
-                            }
-                        ],
-                        desiredKeys: ['CD_name', 'CD_id', 'CD_order', 'CD_project', 'CD_completed', 'CD_date', 'CD_recurring', 'CD_recurrence', 'CD_recurrencetype', 'CD_hideuntildate'],
-                        resultsLimit: 400
-                    };
-                } else if (viewMode === 'history') {
-                    // Fetch ALL completed tasks
-                    query = {
-                        recordType: 'CD_Task',
-                        filterBy: [{
-                            fieldName: 'CD_completed',
-                            comparator: 'EQUALS',
-                            fieldValue: { value: 1 }
-                        }],
-                        desiredKeys: ['CD_name', 'CD_id', 'CD_order', 'CD_project', 'CD_completed', 'CD_modifieddate', 'CD_hideuntildate'],
-                        resultsLimit: 100
-                    };
-                } else if (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due' || viewMode === 'waiting' || viewMode === 'deferred') {
-                    // Next Actions & Someday & Due & Waiting & Deferred: Fetch all active tasks, extensive client-side filtering
-                    query = {
-                        recordType: 'CD_Task',
-                        filterBy: [{
-                            fieldName: 'CD_name',
-                            comparator: 'NOT_EQUALS',
-                            fieldValue: { value: '' }
-                        }],
-                        sortBy: [{ fieldName: 'CD_order', ascending: true }],
-                        desiredKeys: [
-                            'CD_name', 'CD_id', 'CD_order', 'CD_project', 'CD_completed',
-                            'CD_someday', 'CD_waitingfor', 'CD_dateactive',
-                            'CD_date', 'CD_hideuntildate'
-                        ],
-                        resultsLimit: 400
-                    };
-                } else {
-                    // No project selected in project mode, or other unhandled viewMode
-                    console.log('[CloudKit Sync] Unhandled view mode, clearing tasks');
-                    setTasks([]);
-                    setLoadingTasks(false);
-                    return;
-                }
-
-                console.log('[CloudKit Sync] Executing query:', query);
-                const result = await privateDB.performQuery(query, { zoneID });
-
-                if (result.hasErrors) {
-                    console.error('[CloudKit Sync] Query returned errors:', result.errors);
-                    throw new Error(result.errors[0].message);
-                }
-
-                let taskRecords = result.records as TaskRecord[];
-                console.log(`[CloudKit Sync] ✅ Received ${taskRecords.length} tasks from CloudKit`);
-
-                // --- OPTIMISTIC MERGE ---
-                // Apply overrides from optimisticTasks
-
-                // 1. Update existing records with overrides
-                taskRecords = taskRecords.map(t => optimisticTasks[t.recordName] || t);
-
-                // 2. Filter out records that no longer belong to this view
-                if (viewMode === 'project' && selectedProject) {
-                    taskRecords = taskRecords.filter(t => t.fields.CD_project?.value === selectedProject.recordName);
-                } else if (viewMode === 'inbox') {
-                    taskRecords = taskRecords.filter(t => !t.fields.CD_project?.value);
-                } else if (viewMode === 'next_actions') {
-                    console.log(`[Next Actions Debug] Filtering ${taskRecords.length} candidate tasks...`);
-
-                    taskRecords = taskRecords.filter(t => {
-                        const fields = t.fields;
-                        // const name = fields.CD_name?.value || 'Unnamed';
-
-                        // 1. Must not be completed
-                        if (fields.CD_completed?.value === 1) return false;
-
-                        // 2. Must not be Someday
-                        if (fields.CD_someday?.value === 1) return false;
-
-                        // 3. Must not be Waiting For
-                        if (fields.CD_waitingfor?.value === 1) return false;
-
-                        // 4. Must belong to a Project (not Inbox)
-                        if (!fields.CD_project?.value) return false;
-
-                        // 4. Date Logic: Hide future tasks if "Hide Until" is active
-                        const isDateActive = fields.CD_dateactive?.value === 1;
-                        if (isDateActive) {
-                            const isHideUntil = fields.CD_hideuntildate?.value === 1;
-                            if (isHideUntil && fields.CD_date?.value) {
-                                const today = new Date();
-                                today.setHours(0, 0, 0, 0);
-
-                                const taskDate = new Date(fields.CD_date.value);
-                                taskDate.setHours(0, 0, 0, 0);
-
-                                // If date is in future, HIDE it
-                                if (taskDate > today) return false;
-                            }
-                        }
-
-                        return true;
-                    });
-                } else if (viewMode === 'waiting') {
-                    taskRecords = taskRecords.filter(t => {
-                        const fields = t.fields;
-
-                        // 1. Must not be completed
-                        if (fields.CD_completed?.value === 1) return false;
-
-                        // 2. Must not be Someday
-                        if (fields.CD_someday?.value === 1) return false;
-
-                        // 3. MUST be Waiting For
-                        if (fields.CD_waitingfor?.value !== 1) return false;
-
-                        // 4. Must belong to a Project (not Inbox)
-                        if (!fields.CD_project?.value) return false;
-
-                        // 5. Date Logic: Hide future tasks if "Hide Until" is active
-                        const isDateActive = fields.CD_dateactive?.value === 1;
-                        if (isDateActive) {
-                            const isHideUntil = fields.CD_hideuntildate?.value === 1;
-                            if (isHideUntil && fields.CD_date?.value) {
-                                const today = new Date();
-                                today.setHours(0, 0, 0, 0);
-
-                                const taskDate = new Date(fields.CD_date.value);
-                                taskDate.setHours(0, 0, 0, 0);
-
-                                // If date is in future, HIDE it
-                                if (taskDate > today) return false;
-                            }
-                        }
-
-                        return true;
-                    });
-                } else if (viewMode === 'someday') {
-                    taskRecords = taskRecords.filter(t => {
-                        const fields = t.fields;
-
-                        // 1. Must not be completed
-                        if (fields.CD_completed?.value === 1) return false;
-
-                        // 2. MUST be Someday
-                        if (fields.CD_someday?.value !== 1) return false;
-
-                        // 3. Must not be Waiting For
-                        if (fields.CD_waitingfor?.value === 1) return false;
-
-                        // 4. Must belong to a Project (not Inbox)
-                        if (!fields.CD_project?.value) return false;
-
-                        // 5. Date filters (hide future)
-                        const isDateActive = fields.CD_dateactive?.value === 1;
-                        if (isDateActive) {
-                            const isHideUntil = fields.CD_hideuntildate?.value === 1;
-                            if (isHideUntil && fields.CD_date?.value) {
-                                const today = new Date();
-                                today.setHours(0, 0, 0, 0);
-                                const taskDate = new Date(fields.CD_date.value);
-                                taskDate.setHours(0, 0, 0, 0);
-                                if (taskDate > today) return false;
-                            }
-                        }
-                        return true;
-                    });
-                } else if (viewMode === 'due') {
-                    taskRecords = taskRecords.filter(t => {
-                        const fields = t.fields;
-
-                        // 1. Must not be completed
-                        if (fields.CD_completed?.value === 1) return false;
-
-                        // 2. Must have a date set AND be active
-                        if (!fields.CD_date?.value) return false;
-                        if (fields.CD_dateactive?.value !== 1) return false;
-
-                        // 3. Date must be <= END of Today
-                        const todayEnd = new Date();
-                        todayEnd.setHours(23, 59, 59, 999);
-                        const taskDate = new Date(fields.CD_date.value);
-
-                        return taskDate <= todayEnd;
-                    });
-                } else if (viewMode === 'deferred') {
-                    taskRecords = taskRecords.filter(t => {
-                        const fields = t.fields;
-                        if (fields.CD_completed?.value === 1) return false;
-                        if (fields.CD_someday?.value === 1) return false;
-                        if (fields.CD_waitingfor?.value === 1) return false;
-                        if (!fields.CD_project?.value) return false;
-
-                        // Must be Hidden Until Future Date
-                        if (fields.CD_dateactive?.value !== 1) return false;
-                        if (fields.CD_hideuntildate?.value !== 1) return false;
-                        if (!fields.CD_date?.value) return false;
-
-                        const todayEnd = new Date();
-                        todayEnd.setHours(23, 59, 59, 999);
-                        const taskDate = new Date(fields.CD_date.value);
-                        return taskDate > todayEnd;
-                    });
-                }
-
-                // 3. Append missing records from optimisticTasks that BELONG to this view
-                Object.values(optimisticTasks).forEach(override => {
-                    // Check if not completed
-                    if (override.fields.CD_completed?.value === 1) return;
-
-                    if (viewMode === 'project' && selectedProject) {
-                        if (override.fields.CD_project?.value === selectedProject.recordName) {
-                            if (!taskRecords.find(t => t.recordName === override.recordName)) {
-                                taskRecords.push(override);
-                            }
-                        }
-                    } else if (viewMode === 'inbox') {
-                        if (!override.fields.CD_project?.value) {
-                            if (!taskRecords.find(t => t.recordName === override.recordName)) {
-                                taskRecords.push(override);
-                            }
-                        }
-                    } else if (viewMode === 'next_actions') {
-                        // Apply same logic to optimistic tasks
-                        const fields = override.fields;
-                        const today = new Date();
-                        today.setHours(0, 0, 0, 0);
-                        let shouldShow = false;
-
-                        if (
-                            fields.CD_project?.value &&
-                            fields.CD_completed?.value !== 1 &&
-                            fields.CD_someday?.value !== 1 &&
-                            fields.CD_waitingfor?.value !== 1
-                        ) {
-                            const isDateActive = fields.CD_dateactive?.value === 1;
-                            if (!isDateActive) shouldShow = true;
-                            else {
-                                const isHideUntil = fields.CD_hideuntildate?.value === 1;
-                                if (!isHideUntil) shouldShow = true;
-                                else {
-                                    if (!fields.CD_date?.value) shouldShow = true;
-                                    else {
-                                        const taskDate = new Date(fields.CD_date.value);
-                                        taskDate.setHours(0, 0, 0, 0);
-                                        if (taskDate <= today) shouldShow = true;
-                                    }
-                                }
-                            }
-                        }
-
-                        if (shouldShow) {
-                            if (!taskRecords.find(t => t.recordName === override.recordName)) {
-                                taskRecords.push(override);
-                            }
-                        }
-                    }
-                    else if (viewMode === 'someday') {
-                        // Apply Someday filtering checks for overrides
-                        const fields = override.fields;
-                        const today = new Date();
-                        today.setHours(0, 0, 0, 0);
-                        let shouldShow = false;
-
-                        if (
-                            fields.CD_project?.value &&
-                            fields.CD_completed?.value !== 1 &&
-                            fields.CD_someday?.value === 1 && // Must be Someday
-                            fields.CD_waitingfor?.value !== 1
-                        ) {
-                            // Date Checks
-                            const isDateActive = fields.CD_dateactive?.value === 1;
-                            if (!isDateActive) shouldShow = true;
-                            else {
-                                const isHideUntil = fields.CD_hideuntildate?.value === 1;
-                                if (!isHideUntil) shouldShow = true;
-                                else {
-                                    if (!fields.CD_date?.value) shouldShow = true;
-                                    else {
-                                        const taskDate = new Date(fields.CD_date.value);
-                                        taskDate.setHours(0, 0, 0, 0);
-                                        if (taskDate <= today) shouldShow = true;
-                                    }
-                                }
-                            }
-                        }
-
-                        if (shouldShow) {
-                            if (!taskRecords.find(t => t.recordName === override.recordName)) {
-                                taskRecords.push(override);
-                            }
-                        }
-                    } else if (viewMode === 'waiting') {
-                        const fields = override.fields;
-                        const today = new Date();
-                        today.setHours(0, 0, 0, 0);
-                        let shouldShow = false;
-
-                        if (
-                            fields.CD_project?.value &&
-                            fields.CD_completed?.value !== 1 &&
-                            fields.CD_someday?.value !== 1 &&
-                            fields.CD_waitingfor?.value === 1 // Must be Waiting
-                        ) {
-                            // Date Checks (Same as Next Actions)
-                            const isDateActive = fields.CD_dateactive?.value === 1;
-                            if (!isDateActive) shouldShow = true;
-                            else {
-                                const isHideUntil = fields.CD_hideuntildate?.value === 1;
-                                if (!isHideUntil) shouldShow = true;
-                                else {
-                                    if (!fields.CD_date?.value) shouldShow = true;
-                                    else {
-                                        const taskDate = new Date(fields.CD_date.value);
-                                        taskDate.setHours(0, 0, 0, 0);
-                                        if (taskDate <= today) shouldShow = true;
-                                    }
-                                }
-                            }
-                        }
-
-                        if (shouldShow) {
-                            if (!taskRecords.find(t => t.recordName === override.recordName)) {
-                                taskRecords.push(override);
-                            }
-                        }
-                    } else if (viewMode === 'due') {
-                        const fields = override.fields;
-                        if (
-                            fields.CD_completed?.value !== 1 &&
-                            fields.CD_date?.value &&
-                            fields.CD_dateactive?.value === 1
-                        ) {
-                            const todayEnd = new Date();
-                            todayEnd.setHours(23, 59, 59, 999);
-                            const taskDate = new Date(fields.CD_date.value);
-
-                            if (taskDate <= todayEnd) {
-                                if (!taskRecords.find(t => t.recordName === override.recordName)) {
-                                    taskRecords.push(override);
-                                }
-                            }
-                        }
-                    } else if (viewMode === 'deferred') {
-                        const fields = override.fields;
-                        if (
-                            fields.CD_completed?.value !== 1 &&
-                            fields.CD_someday?.value !== 1 &&
-                            fields.CD_waitingfor?.value !== 1 &&
-                            fields.CD_project?.value &&
-                            fields.CD_dateactive?.value === 1 &&
-                            fields.CD_hideuntildate?.value === 1 &&
-                            fields.CD_date?.value
-                        ) {
-                            const todayEnd = new Date();
-                            todayEnd.setHours(23, 59, 59, 999);
-                            const taskDate = new Date(fields.CD_date.value);
-                            if (taskDate > todayEnd) {
-                                if (!taskRecords.find(t => t.recordName === override.recordName)) {
-                                    taskRecords.push(override);
-                                }
-                            }
-                        }
-                    }
-                });
-                // ------------------------
-
-                // Sort tasks
-                if (viewMode === 'history') {
-                    // Sort by Modified Date DESC (Most recent first)
-                    taskRecords.sort((a, b) => (b.fields.CD_modifieddate?.value ?? 0) - (a.fields.CD_modifieddate?.value ?? 0));
-                } else {
-                    // Default: Sort by Order ASC
-                    taskRecords.sort((a, b) => (a.fields.CD_order?.value ?? 0) - (b.fields.CD_order?.value ?? 0));
-                }
-
-                console.log(`[CloudKit Sync] 📋 Final task count after filtering: ${taskRecords.length}`);
-                setTasks(taskRecords);
-                setTasks(taskRecords);
-            } catch (err: any) {
-                console.error('[CloudKit Sync] ❌ Fetch tasks error:', err);
-                setTaskError(err.message || 'Failed to fetch tasks');
-                if (!isPoll) setTasks([]);
-            } finally {
-                if (!isPoll) setLoadingTasks(false);
-            }
-        };
-
-        console.log('[CloudKit Sync] 🚀 Setting up polling interval');
-        fetchTasks(true);
-
-        if (!editingTaskId && !editingId) {
-            // Poll every 10 seconds to keep fresh
-            const intervalId = setInterval(() => fetchTasks(true), 10000);
-            console.log('[CloudKit Sync] ⏰ Polling interval created:', intervalId);
-
-            return () => {
-                console.log('[CloudKit Sync] 🛑 Cleaning up polling interval:', intervalId);
-                clearInterval(intervalId);
-            };
+        // PAUSE filtering if user is editing a task to prevent overwriting the task list
+        if (editingTaskId || editingId) {
+            console.log('[View Filter] ⏸️ Filtering paused during editing');
+            return;
         }
-    }, [selectedProject, viewMode, container, editingTaskId, editingId]);
+
+        console.log('[View Filter] 🔍 Filtering cache for view:', viewMode, selectedProject?.fields.CD_name?.value || '');
+
+        // Filter cache based on current view
+        let filtered = Object.values(allTasksCache);
+
+        // If in project mode but no project selected, show empty
+        if (viewMode === 'project' && !selectedProject) {
+            console.log('[View Filter] No project selected, showing empty');
+            setTasks([]);
+            setLoadingTasks(false);
+            return;
+        }
+
+        // Filter based on view mode
+        if (viewMode === 'project' && selectedProject) {
+            // Project view: tasks belonging to selected project
+            filtered = filtered.filter(t => {
+                if (t.fields.CD_completed?.value === 1) return false;
+                if (t.fields.CD_someday?.value === 1) return false;
+                if (t.fields.CD_waitingfor?.value === 1) return false;
+                return t.fields.CD_project?.value === selectedProject.recordName;
+            });
+        } else if (viewMode === 'inbox') {
+            // Inbox: tasks without project, not someday, not waiting
+            filtered = filtered.filter(t => {
+                if (t.fields.CD_completed?.value === 1) return false;
+                if (t.fields.CD_someday?.value === 1) return false;
+                if (t.fields.CD_waitingfor?.value === 1) return false;
+                return !t.fields.CD_project?.value;
+            });
+        } else if (viewMode === 'next_actions') {
+            // Next Actions: has project, not someday, not waiting, not deferred
+            filtered = filtered.filter(t => {
+                if (t.fields.CD_completed?.value === 1) return false;
+                if (t.fields.CD_someday?.value === 1) return false;
+                if (t.fields.CD_waitingfor?.value === 1) return false;
+                if (!t.fields.CD_project?.value) return false;
+
+                // Exclude deferred (hidden until future date)
+                if (t.fields.CD_dateactive?.value === 1 &&
+                    t.fields.CD_hideuntildate?.value === 1 &&
+                    t.fields.CD_date?.value) {
+                    const todayEnd = new Date();
+                    todayEnd.setHours(23, 59, 59, 999);
+                    const taskDate = new Date(t.fields.CD_date.value);
+                    if (taskDate > todayEnd) return false;
+                }
+
+                return true;
+            });
+        } else if (viewMode === 'waiting') {
+            // Waiting For: has waitingfor flag
+            filtered = filtered.filter(t => {
+                if (t.fields.CD_completed?.value === 1) return false;
+                return t.fields.CD_waitingfor?.value === 1;
+            });
+        } else if (viewMode === 'someday') {
+            // Someday: has someday flag
+            filtered = filtered.filter(t => {
+                if (t.fields.CD_completed?.value === 1) return false;
+                return t.fields.CD_someday?.value === 1;
+            });
+        } else if (viewMode === 'due') {
+            // Due: has date, date is today or earlier, not deferred
+            filtered = filtered.filter(t => {
+                if (t.fields.CD_completed?.value === 1) return false;
+                if (t.fields.CD_someday?.value === 1) return false;
+                if (t.fields.CD_waitingfor?.value === 1) return false;
+                if (!t.fields.CD_dateactive?.value || t.fields.CD_dateactive.value !== 1) return false;
+                if (!t.fields.CD_date?.value) return false;
+
+                // Exclude if hidden until future
+                if (t.fields.CD_hideuntildate?.value === 1) {
+                    const todayEnd = new Date();
+                    todayEnd.setHours(23, 59, 59, 999);
+                    const taskDate = new Date(t.fields.CD_date.value);
+                    if (taskDate > todayEnd) return false;
+                }
+
+                // Include if date is today or past
+                const todayEnd = new Date();
+                todayEnd.setHours(23, 59, 59, 999);
+                const taskDate = new Date(t.fields.CD_date.value);
+                return taskDate <= todayEnd;
+            });
+        } else if (viewMode === 'deferred') {
+            // Deferred: has project, hidden until future date
+            filtered = filtered.filter(t => {
+                if (t.fields.CD_completed?.value === 1) return false;
+                if (t.fields.CD_someday?.value === 1) return false;
+                if (t.fields.CD_waitingfor?.value === 1) return false;
+                if (!t.fields.CD_project?.value) return false;
+
+                // Must be hidden until future date
+                if (t.fields.CD_dateactive?.value !== 1) return false;
+                if (t.fields.CD_hideuntildate?.value !== 1) return false;
+                if (!t.fields.CD_date?.value) return false;
+
+                const todayEnd = new Date();
+                todayEnd.setHours(23, 59, 59, 999);
+                const taskDate = new Date(t.fields.CD_date.value);
+                return taskDate > todayEnd;
+            });
+        } else if (viewMode === 'history') {
+            // History: completed tasks only
+            filtered = filtered.filter(t => t.fields.CD_completed?.value === 1);
+        }
+
+        // Sort by order (or by modified date for history)
+        if (viewMode === 'history') {
+            filtered.sort((a, b) => {
+                const dateA = a.fields.CD_modifieddate?.value ?? 0;
+                const dateB = b.fields.CD_modifieddate?.value ?? 0;
+                return dateB - dateA; // DESC
+            });
+        } else {
+            filtered.sort((a, b) => {
+                const orderA = a.fields.CD_order?.value ?? 0;
+                const orderB = b.fields.CD_order?.value ?? 0;
+                return orderA - orderB;
+            });
+        }
+
+        console.log(`[View Filter] ✅ Filtered ${filtered.length} tasks from cache`);
+        setTasks(filtered);
+        setLoadingTasks(false);
+    }, [selectedProject, viewMode, cacheInitialized, allTasksCache, editingTaskId, editingId]);
 
 
     const handleToggleComplete = async (task: TaskRecord) => {
