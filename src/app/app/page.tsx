@@ -1,11 +1,21 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { CloudKitProvider, useCloudKit } from '@/components/CloudKitProvider';
 import Navbar from '@/components/Navbar';
 import Footer from '@/components/Footer';
 import { ProjectRecord, TaskRecord } from '@/lib/cloudkit';
+import { TaskItem } from '@/components/app/TaskItem';
+import { Sidebar } from '@/components/app/Sidebar';
+import { TaskSection } from '@/components/app/TaskSection';
 import { Loader2, ListTodo, CheckCircle2, Pencil, Check, X, ClipboardList, Plus, Clock, RotateCcw, Calendar, Hourglass, Repeat, Moon, ChevronRight, Zap, Inbox, Keyboard, CalendarClock, CalendarDays } from 'lucide-react';
+
+const getTaskSection = (task: TaskRecord): 'nextActions' | 'waitingFor' | 'deferred' | 'somedayMaybe' => {
+    if (task.fields.CD_waitingfor?.value === 1) return 'waitingFor';
+    if (task.fields.CD_someday?.value === 1) return 'somedayMaybe';
+    if (task.fields.CD_hideuntildate?.value === 1 && task.fields.CD_date?.value && task.fields.CD_date.value > Date.now()) return 'deferred';
+    return 'nextActions';
+};
 
 function ProjectsList() {
     const { container, isAuthenticated, isLoading, login } = useCloudKit();
@@ -1419,6 +1429,18 @@ function ProjectsList() {
         const newIndex = tasks.findIndex(t => t.recordName === targetTask.recordName);
         if (newIndex === -1) return;
 
+        // Enforce Section Constraints (Project View)
+        if (viewMode === 'project' && selectedProject) {
+            const draggedTask = tasks[oldIndex];
+            const draggedSection = getTaskSection(draggedTask);
+            const targetSection = getTaskSection(targetTask);
+
+            if (draggedSection !== targetSection) {
+                console.log(`[Drag] Cannot move task between sections (${draggedSection} -> ${targetSection})`);
+                return;
+            }
+        }
+
         // Reorder locally
         const newTasks = [...tasks];
         const [movedTask] = newTasks.splice(oldIndex, 1);
@@ -1823,10 +1845,57 @@ function ProjectsList() {
         }
     });
 
+    const sections = useMemo(() => {
+        if (viewMode !== 'project') return null;
+
+        const nextActions: TaskRecord[] = [];
+        const waitingFor: TaskRecord[] = [];
+        const deferred: TaskRecord[] = [];
+        const somedayMaybe: TaskRecord[] = [];
+
+        visibleTasks.forEach(t => {
+            const section = getTaskSection(t);
+            if (section === 'waitingFor') waitingFor.push(t);
+            else if (section === 'somedayMaybe') somedayMaybe.push(t);
+            else if (section === 'deferred') deferred.push(t);
+            else nextActions.push(t);
+        });
+
+        return { nextActions, waitingFor, deferred, someday: somedayMaybe };
+    }, [visibleTasks, viewMode]);
+
     // Details Side Panel Handlers
     const handleTaskClick = (task: TaskRecord) => {
         setSelectedTaskDetails(task);
     };
+
+    const renderTaskList = (tasksToRender: TaskRecord[]) => (
+        <>
+            {tasksToRender.map(task => (
+                <TaskItem
+                    key={task.recordName}
+                    task={task}
+                    viewMode={viewMode}
+                    editingTaskId={editingTaskId}
+                    dragOverTaskId={dragOverTaskId}
+                    projects={projects}
+                    editTaskName={editTaskName}
+                    setEditTaskName={setEditTaskName}
+                    onDragStart={handleDragStart}
+                    onDragOver={handleTaskDragOver}
+                    onDragEnter={handleTaskDragEnter}
+                    onDragLeave={handleTaskDragLeave}
+                    onDrop={handleTaskDrop}
+                    onToggleComplete={handleToggleComplete}
+                    onTaskClick={handleTaskClick}
+                    onSave={handleTaskSave}
+                    onCancel={handleTaskCancel}
+                    onInsertTask={handleInsertTask}
+                    onEditClick={handleTaskEditClick}
+                />
+            ))}
+        </>
+    );
 
     // Modified to accept batch updates or single field
     const handleUpdateTaskDetail = async (fieldOrUpdates: keyof TaskRecord['fields'] | Record<string, any>, value?: any) => {
@@ -1994,422 +2063,34 @@ function ProjectsList() {
     return (
         <div className="flex h-[calc(100vh-64px)] mt-16 bg-white overflow-hidden relative">
             {/* Sidebar: Projects */}
-            <div className="w-64 border-r border-gray-100 bg-gray-50/50 flex flex-col">
-                <div className="p-2 space-y-1 mt-2 mx-2">
-                    <div
-                        onClick={() => {
-                            setViewMode('inbox');
-                            setSelectedProject(null);
-                        }}
-                        onDragOver={(e) => {
-                            e.preventDefault();
-                            e.dataTransfer.dropEffect = 'move';
-                            if (dragOverProjectId !== 'inbox-pseudo-project') {
-                                setDragOverProjectId('inbox-pseudo-project');
-                            }
-                        }}
-                        onDragEnter={(e) => {
-                            e.preventDefault();
-                            if (dragOverProjectId !== 'inbox-pseudo-project') {
-                                setDragOverProjectId('inbox-pseudo-project');
-                            }
-                        }}
-                        onDragLeave={(e) => {
-                            // Prevent flickering when hovering over children
-                            if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-                                setDragOverProjectId(null);
-                            }
-                        }}
-                        onDrop={(e) => handleDrop(e, { recordName: 'inbox-pseudo-project', recordType: 'CD_Project', fields: { CD_name: { value: 'Inbox' }, CD_id: { value: 'inbox' } } } as any)}
-                        className={`group flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${viewMode === 'inbox'
-                            ? 'bg-blue-50 text-blue-700'
-                            : dragOverProjectId === 'inbox-pseudo-project'
-                                ? 'bg-blue-100 ring-2 ring-blue-300 ring-inset'
-                                : 'hover:bg-gray-100 text-gray-700'
-                            }`}
-                    >
-                        <Inbox className="w-5 h-5 text-blue-500" />
-                        <span className="font-medium">Inbox</span>
-                    </div>
-
-                    <div
-                        onClick={() => {
-                            setViewMode('due');
-                            setSelectedProject(null);
-                        }}
-                        onDragOver={(e) => {
-                            e.preventDefault();
-                            e.dataTransfer.dropEffect = 'move';
-                        }}
-                        onDragEnter={(e) => {
-                            e.preventDefault();
-                            if (dragOverProjectId !== 'due-pseudo-project') {
-                                setDragOverProjectId('due-pseudo-project');
-                            }
-                        }}
-                        onDragLeave={(e) => {
-                            if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-                                setDragOverProjectId(null);
-                            }
-                        }}
-                        onDrop={handleDropDue}
-                        className={`group flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${viewMode === 'due'
-                            ? 'bg-orange-50 text-orange-700'
-                            : dragOverProjectId === 'due-pseudo-project'
-                                ? 'bg-orange-100 ring-2 ring-orange-300 ring-inset'
-                                : 'hover:bg-gray-100 text-gray-700'
-                            }`}
-                    >
-                        <CalendarClock className={`w-5 h-5 ${viewMode === 'due' ? 'text-orange-500' : 'text-gray-400'}`} />
-                        <span className="font-medium">Due and Overdue</span>
-                    </div>
-
-                    <div
-                        onClick={() => {
-                            setViewMode('next_actions');
-                            setSelectedProject(null);
-                        }}
-                        onDragOver={(e) => {
-                            e.preventDefault();
-                            e.dataTransfer.dropEffect = 'move';
-                        }}
-                        onDragEnter={(e) => {
-                            e.preventDefault();
-                            if (dragOverProjectId !== 'next-actions-pseudo-project') {
-                                setDragOverProjectId('next-actions-pseudo-project');
-                            }
-                        }}
-                        onDragLeave={(e) => {
-                            // Prevent flickering when hovering over children
-                            if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-                                setDragOverProjectId(null);
-                            }
-                        }}
-                        onDrop={handleDropNextActions}
-                        className={`group flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${viewMode === 'next_actions'
-                            ? 'bg-purple-50 text-purple-700'
-                            : dragOverProjectId === 'next-actions-pseudo-project'
-                                ? 'bg-purple-100 ring-2 ring-purple-300 ring-inset'
-                                : 'hover:bg-gray-100 text-gray-700'
-                            }`}
-                    >
-                        <Zap className={`w-5 h-5 ${viewMode === 'next_actions' ? 'text-purple-500' : 'text-gray-400'}`} />
-                        <span className="font-medium">Next actions</span>
-                    </div>
-
-                    <div
-                        onClick={() => {
-                            setViewMode('waiting');
-                            setSelectedProject(null);
-                        }}
-                        onDragOver={(e) => {
-                            e.preventDefault();
-                            e.dataTransfer.dropEffect = 'move';
-                        }}
-                        onDragEnter={(e) => {
-                            e.preventDefault();
-                            if (dragOverProjectId !== 'waiting-pseudo-project') {
-                                setDragOverProjectId('waiting-pseudo-project');
-                            }
-                        }}
-                        onDragLeave={(e) => {
-                            if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-                                setDragOverProjectId(null);
-                            }
-                        }}
-                        onDrop={handleDropWaiting}
-                        className={`group flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${viewMode === 'waiting'
-                            ? 'bg-indigo-50 text-indigo-700'
-                            : dragOverProjectId === 'waiting-pseudo-project'
-                                ? 'bg-indigo-100 ring-2 ring-indigo-300 ring-inset'
-                                : 'hover:bg-gray-100 text-gray-700'
-                            }`}
-                    >
-                        <Hourglass className={`w-5 h-5 ${viewMode === 'waiting' ? 'text-indigo-500' : 'text-gray-400'}`} />
-                        <span className="font-medium">Waiting for</span>
-                    </div>
-
-                    <div
-                        onClick={() => {
-                            setViewMode('deferred');
-                            setSelectedProject(null);
-                        }}
-                        onDragOver={(e) => {
-                            e.preventDefault();
-                            e.dataTransfer.dropEffect = 'move';
-                        }}
-                        onDragEnter={(e) => {
-                            e.preventDefault();
-                            if (dragOverProjectId !== 'deferred-pseudo-project') {
-                                setDragOverProjectId('deferred-pseudo-project');
-                            }
-                        }}
-                        onDragLeave={(e) => {
-                            if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-                                setDragOverProjectId(null);
-                            }
-                        }}
-                        onDrop={handleDropDeferred}
-                        className={`group flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${viewMode === 'deferred'
-                            ? 'bg-teal-50 text-teal-700'
-                            : dragOverProjectId === 'deferred-pseudo-project'
-                                ? 'bg-teal-100 ring-2 ring-teal-300 ring-inset'
-                                : 'hover:bg-gray-100 text-gray-700'
-                            }`}
-                    >
-                        <CalendarDays className={`w-5 h-5 ${viewMode === 'deferred' ? 'text-teal-500' : 'text-gray-400'}`} />
-                        <span className="font-medium">Deferred</span>
-                    </div>
-
-                    <div
-                        onClick={() => {
-                            setViewMode('someday');
-                            setSelectedProject(null);
-                        }}
-                        onDragOver={(e) => {
-                            e.preventDefault();
-                            e.dataTransfer.dropEffect = 'move';
-                        }}
-                        onDragEnter={(e) => {
-                            e.preventDefault();
-                            if (dragOverProjectId !== 'someday-pseudo-project') {
-                                setDragOverProjectId('someday-pseudo-project');
-                            }
-                        }}
-                        onDragLeave={(e) => {
-                            if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-                                setDragOverProjectId(null);
-                            }
-                        }}
-                        onDrop={handleDropSomeday}
-                        className={`group flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${viewMode === 'someday'
-                            ? 'bg-amber-50 text-amber-700'
-                            : dragOverProjectId === 'someday-pseudo-project'
-                                ? 'bg-amber-100 ring-2 ring-amber-300 ring-inset'
-                                : 'hover:bg-gray-100 text-gray-700'
-                            }`}
-                    >
-                        <CalendarClock className={`w-5 h-5 ${viewMode === 'someday' ? 'text-amber-500' : 'text-gray-400'}`} />
-                        <span className="font-medium">Someday / Maybe</span>
-                    </div>
-                </div>
-
-                <div className="p-4 border-b border-gray-100 border-t mt-2">
-                    <h2 className="font-bold text-gray-900 flex items-center gap-2">
-                        <ClipboardList className="w-5 h-5 text-blue-600" />
-                        Projects ({projects.length})
-                        <button
-                            onClick={handleCreateProject}
-                            className="ml-auto p-1 rounded-full text-gray-400 hover:bg-blue-50 hover:text-blue-600 transition-colors"
-                            title="New Project (P)"
-                        >
-                            <Plus className="w-5 h-5" />
-                        </button>
-                    </h2>
-                </div>
-
-                <div className="flex-1 overflow-y-auto p-2 space-y-1">
-                    {fetching ? (
-                        <div className="flex justify-center p-4">
-                            <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
-                        </div>
-                    ) : (
-                        <>
-                            {/* Active Projects */}
-                            {projects
-                                .filter(p => (!p.fields.CD_focus || p.fields.CD_focus.value !== 0) || p.fields.CD_singleactions?.value === 1)
-                                .map(project => (
-                                    <div
-                                        key={project.recordName}
-                                        draggable={project.fields.CD_singleactions?.value !== 1}
-                                        onDragStart={(e) => handleDragStart(e, project, 'project')}
-                                        onDragEnd={handleDragEnd}
-                                        onClick={() => {
-                                            setSelectedProject(project);
-                                            setViewMode('project');
-                                        }}
-                                        onDragOver={(e) => {
-                                            e.preventDefault();
-                                            e.dataTransfer.dropEffect = 'move';
-                                            if (dragOverProjectId !== project.recordName) {
-                                                setDragOverProjectId(project.recordName);
-                                            }
-                                        }}
-                                        onDragEnter={(e) => {
-                                            e.preventDefault();
-                                            if (dragOverProjectId !== project.recordName) {
-                                                setDragOverProjectId(project.recordName);
-                                            }
-                                        }}
-                                        onDragLeave={(e) => {
-                                            if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-                                                setDragOverProjectId(null);
-                                            }
-                                        }}
-                                        onDrop={(e) => handleDrop(e, project)}
-                                        className={`group flex items-center justify-between p-2 rounded-lg cursor-pointer transition-colors ${viewMode === 'project' && selectedProject?.recordName === project.recordName
-                                            ? 'bg-blue-50 text-blue-700'
-                                            : dragOverProjectId === project.recordName
-                                                ? isDraggingProject
-                                                    ? dragOverPosition === 'top' ? 'border-t-2 border-blue-500' : 'border-b-2 border-blue-500'
-                                                    : 'bg-blue-100 ring-2 ring-blue-300 ring-inset'
-                                                : 'hover:bg-gray-100 text-gray-700'
-                                            }`}
-                                    >
-                                        <div className="flex-1 min-w-0 font-medium truncate">
-                                            {editingId === project.recordName ? (
-                                                <div className="flex items-center gap-1">
-                                                    <input
-                                                        type="text"
-                                                        value={editName}
-                                                        onChange={(e) => setEditName(e.target.value)}
-                                                        className="block w-full text-sm rounded border-gray-300 px-1 py-0.5"
-                                                        autoFocus
-                                                        onKeyDown={(e) => {
-                                                            if (e.key === 'Enter') handleProjectSave();
-                                                            if (e.key === 'Escape') handleCancel();
-                                                        }}
-                                                        onClick={(e) => e.stopPropagation()}
-                                                    />
-                                                    <button onClick={(e) => { e.stopPropagation(); handleProjectSave(); }} className="text-green-600"><Check className="w-4 h-4" /></button>
-                                                    <button onClick={(e) => { e.stopPropagation(); handleCancel(); }} className="text-red-600"><X className="w-4 h-4" /></button>
-                                                </div>
-                                            ) : (
-                                                <div className="flex items-center justify-between w-full">
-                                                    <span className="truncate">{project.fields.CD_name?.value || 'Untitled'}</span>
-                                                    <button
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            handleEditClick(project);
-                                                        }}
-                                                        className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-blue-600 rounded"
-                                                    >
-                                                        <Pencil className="w-3 h-3" />
-                                                    </button>
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-                                ))}
-
-                            {/* Projects on Hold */}
-                            {projects.some(p => p.fields.CD_focus?.value === 0 && p.fields.CD_singleactions?.value !== 1) && (
-                                <>
-                                    <div className="p-4 border-b border-gray-100 border-t mt-4 mb-2">
-                                        <h3 className="font-bold text-gray-500 text-xs uppercase tracking-wider">
-                                            Projects on hold
-                                        </h3>
-                                    </div>
-                                    {projects
-                                        .filter(p => p.fields.CD_focus?.value === 0 && p.fields.CD_singleactions?.value !== 1)
-                                        .map(project => (
-                                            <div
-                                                key={project.recordName}
-                                                draggable={true}
-                                                onDragStart={(e) => handleDragStart(e, project, 'project')}
-                                                onDragEnd={handleDragEnd}
-                                                onClick={() => {
-                                                    setSelectedProject(project);
-                                                    setViewMode('project');
-                                                }}
-                                                onDragOver={(e) => {
-                                                    e.preventDefault();
-                                                    e.dataTransfer.dropEffect = 'move';
-                                                    if (dragOverProjectId !== project.recordName) {
-                                                        setDragOverProjectId(project.recordName);
-                                                    }
-                                                }}
-                                                onDragEnter={(e) => {
-                                                    e.preventDefault();
-                                                    if (dragOverProjectId !== project.recordName) {
-                                                        setDragOverProjectId(project.recordName);
-                                                    }
-                                                }}
-                                                onDragLeave={(e) => {
-                                                    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-                                                        setDragOverProjectId(null);
-                                                    }
-                                                }}
-                                                onDrop={(e) => handleDrop(e, project)}
-                                                className={`group flex items-center justify-between p-2 rounded-lg cursor-pointer transition-colors opacity-75 ${viewMode === 'project' && selectedProject?.recordName === project.recordName
-                                                    ? 'bg-gray-100 text-gray-900'
-                                                    : dragOverProjectId === project.recordName
-                                                        ? isDraggingProject
-                                                            ? dragOverPosition === 'top' ? 'border-t-2 border-blue-500' : 'border-b-2 border-blue-500'
-                                                            : 'bg-gray-100 ring-2 ring-gray-300 ring-inset'
-                                                        : 'hover:bg-gray-50 text-gray-600'
-                                                    }`}
-                                            >
-                                                <div className="flex-1 min-w-0 font-medium truncate">
-                                                    {editingId === project.recordName ? (
-                                                        <div className="flex items-center gap-1">
-                                                            <input
-                                                                type="text"
-                                                                value={editName}
-                                                                onChange={(e) => setEditName(e.target.value)}
-                                                                className="block w-full text-sm rounded border-gray-300 px-1 py-0.5"
-                                                                autoFocus
-                                                                onKeyDown={(e) => {
-                                                                    if (e.key === 'Enter') handleProjectSave();
-                                                                    if (e.key === 'Escape') handleCancel();
-                                                                }}
-                                                                onClick={(e) => e.stopPropagation()}
-                                                            />
-                                                            <button onClick={(e) => { e.stopPropagation(); handleProjectSave(); }} className="text-green-600"><Check className="w-4 h-4" /></button>
-                                                            <button onClick={(e) => { e.stopPropagation(); handleCancel(); }} className="text-red-600"><X className="w-4 h-4" /></button>
-                                                        </div>
-                                                    ) : (
-                                                        <div className="flex items-center justify-between w-full">
-                                                            <span className="truncate">{project.fields.CD_name?.value || 'Untitled'}</span>
-                                                            <button
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    handleEditClick(project);
-                                                                }}
-                                                                className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-blue-600 rounded"
-                                                            >
-                                                                <Pencil className="w-3 h-3" />
-                                                            </button>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        ))}
-                                </>
-                            )}
-                        </>
-                    )}
-                </div>
-
-                {/* Sidebar Footer: Global Views */}
-                <div className="p-2 border-t border-gray-100 bg-white">
-                    <div
-                        onClick={() => {
-                            setViewMode('history');
-                            setSelectedProject(null);
-                        }}
-                        className={`group flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${viewMode === 'history'
-                            ? 'bg-blue-50 text-blue-700'
-                            : 'hover:bg-gray-100 text-gray-700'
-                            }`}
-                    >
-                        <Clock className="w-5 h-5 text-gray-400 group-hover:text-blue-600" />
-                        <span className="font-medium">Completed Tasks</span>
-                    </div>
-                </div>
-
-                {/* Keyboard Shortcuts Button */}
-                <div className="p-4 border-t border-gray-100">
-                    <button
-                        onClick={() => setShowShortcuts(true)}
-                        className="w-full flex items-center gap-2 p-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-                    >
-                        <Keyboard className="w-4 h-4" />
-                        <span>Keyboard Shortcuts</span>
-                        <span className="ml-auto text-xs text-gray-400">?</span>
-                    </button>
-                </div>
-            </div>
+            <Sidebar
+                viewMode={viewMode}
+                setViewMode={(mode) => setViewMode(mode)}
+                selectedProject={selectedProject}
+                setSelectedProject={setSelectedProject}
+                projects={projects}
+                fetching={fetching}
+                dragOverProjectId={dragOverProjectId}
+                setDragOverProjectId={setDragOverProjectId}
+                dragOverPosition={dragOverPosition}
+                isDraggingProject={isDraggingProject}
+                editingId={editingId}
+                editName={editName}
+                setEditName={setEditName}
+                onCreateProject={handleCreateProject}
+                onProjectSave={handleProjectSave}
+                onCancel={handleCancel}
+                onEditClick={handleEditClick}
+                onDragStart={handleDragStart}
+                onDragEnd={handleDragEnd}
+                onDrop={handleDrop}
+                onDropDue={handleDropDue}
+                onDropNextActions={handleDropNextActions}
+                onDropWaiting={handleDropWaiting}
+                onDropDeferred={handleDropDeferred}
+                onDropSomeday={handleDropSomeday}
+                onShowShortcuts={setShowShortcuts}
+            />
 
             {/* Keyboard Shortcuts Modal */}
             {showShortcuts && (
@@ -2740,97 +2421,35 @@ function ProjectsList() {
                             )}
                         </div>
                     ) : (
-                        <div className="space-y-2">
-                            {visibleTasks.map(task => (
-                                <div
-                                    key={task.recordName}
-                                    draggable={(viewMode === 'project' || viewMode === 'inbox' || viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'waiting' || viewMode === 'deferred' || viewMode === 'due') && editingTaskId !== task.recordName} // Enable drag for Project, Inbox, Next Actions, Someday, Waiting, Deferred, Due
-                                    onDragStart={(e) => handleDragStart(e, task, 'task')}
-                                    // Drop Handlers for Reordering
-                                    onDragOver={handleTaskDragOver}
-                                    onDragEnter={() => handleTaskDragEnter(task)}
-                                    onDragLeave={handleTaskDragLeave}
-                                    onDrop={(e) => handleTaskDrop(e, task)}
-                                    className={`group p-4 bg-white border border-gray-100 rounded-xl hover:shadow-sm transition-all flex items-center gap-3 ${(viewMode === 'project' || viewMode === 'inbox' || viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'waiting' || viewMode === 'deferred' || viewMode === 'due') ? 'cursor-grab active:cursor-grabbing hover:border-blue-100' : 'opacity-75'
-                                        } ${dragOverTaskId === task.recordName
-                                            ? 'border-blue-400 border-t-4 border-t-blue-500' // Visual cue (insert above style) 
-                                            : ''
-                                        }`}
-                                >
-                                    <div
-                                        className={`w-5 h-5 rounded-full border-2 cursor-pointer flex items-center justify-center transition-colors ${task.fields.CD_completed?.value === 1
-                                            ? 'bg-green-500 border-green-500' // Visual "checked" state
-                                            : 'border-gray-300 hover:border-blue-400'
-                                            }`}
-                                        onClick={() => handleToggleComplete(task)}
-                                        title={viewMode === 'history' ? "Restore Task" : "Complete Task"}
-                                    >
-                                        {task.fields.CD_completed?.value === 1 && (
-                                            viewMode === 'history' ? <RotateCcw className="w-3 h-3 text-white" /> : <Check className="w-3.5 h-3.5 text-white" />
-                                        )}
-                                    </div>
-
-                                    <div className="flex-1 min-w-0" onClick={() => handleTaskClick(task)}>
-                                        {editingTaskId === task.recordName ? (
-                                            <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                                                <input
-                                                    type="text"
-                                                    value={editTaskName}
-                                                    onChange={(e) => setEditTaskName(e.target.value)}
-                                                    className="flex-1 text-sm rounded border-gray-300 px-2 py-1"
-                                                    autoFocus
-                                                    onKeyDown={(e) => {
-                                                        if (e.key === 'Enter') handleTaskSave(task);
-                                                        if (e.key === 'Escape') handleTaskCancel();
-                                                    }}
-                                                />
-                                                <button onClick={() => handleTaskSave(task)} className="text-green-600 p-1 hover:bg-green-50 rounded"><Check className="w-4 h-4" /></button>
-                                                <button onClick={() => handleTaskCancel()} className="text-red-600 p-1 hover:bg-red-50 rounded"><X className="w-4 h-4" /></button>
-                                            </div>
-                                        ) : (
-                                            <div className="flex items-center justify-between w-full relative cursor-pointer">
-                                                <span className={`text-gray-900 ${task.fields.CD_completed?.value === 1 ? 'line-through text-gray-400' : ''}`}>
-                                                    {task.fields.CD_name?.value}
-                                                </span>
-                                                {/* Meta Icons (Mini badges) */}
-                                                <div className="flex items-center gap-1 ml-2">
-                                                    {task.fields.CD_date?.value && task.fields.CD_dateactive?.value === 1 ? <span className="text-[10px] bg-red-50 text-red-500 px-1.5 py-0.5 rounded flex items-center gap-1"><Calendar className="w-3 h-3" /> {new Date(task.fields.CD_date.value).toLocaleDateString()}</span> : null}
-                                                    {(!task.fields.CD_someday?.value && !task.fields.CD_waitingfor?.value) ? <span title="Next Action" className="text-yellow-500"><Zap className="w-3 h-3" /></span> : null}
-                                                    {task.fields.CD_waitingfor?.value === 1 && <span title="Waiting For" className="text-orange-400"><Hourglass className="w-3 h-3" /></span>}
-                                                    {task.fields.CD_someday?.value === 1 && <span title="Someday" className="text-purple-400"><Moon className="w-3 h-3" /></span>}
-                                                    {task.fields.CD_recurring?.value === 1 && <span title="Recurring" className="text-blue-400"><Repeat className="w-3 h-3" /></span>}
-                                                </div>
-
-                                                {/* Show actions in Project Mode, Inbox Mode, Next Actions Mode, Someday Mode, Waiting Mode, Deferred Mode, Due Mode */}
-                                                {(viewMode === 'project' || viewMode === 'inbox' || viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'waiting' || viewMode === 'deferred' || viewMode === 'due') && (
-                                                    <div className="flex items-center ml-auto opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
-                                                        <button
-                                                            onClick={() => handleInsertTask(task)}
-                                                            className="p-1 mr-1 text-gray-400 hover:text-green-600 rounded"
-                                                            title="Insert Task Below"
-                                                        >
-                                                            <Plus className="w-3.5 h-3.5" />
-                                                        </button>
-                                                        <button
-                                                            onClick={() => handleTaskEditClick(task)}
-                                                            className="p-1 text-gray-400 hover:text-blue-600 rounded"
-                                                        >
-                                                            <Pencil className="w-3.5 h-3.5" />
-                                                        </button>
-                                                        <ChevronRight className="w-4 h-4 text-gray-300" />
-                                                    </div>
-                                                )}
-                                                {/* Show different actions or Project Name in History Mode? */}
-                                                {viewMode === 'history' && (
-                                                    <span className="text-xs text-gray-400 ml-auto">
-                                                        {projects.find(p => p.recordName === task.fields.CD_project?.value)?.fields.CD_name?.value}
-                                                    </span>
-                                                )}
-                                            </div>
-                                        )}
-                                    </div>
+                        <div className="space-y-6">
+                            {viewMode === 'project' && sections ? (
+                                <>
+                                    {(sections.nextActions.length > 0 || (sections.waitingFor.length === 0 && sections.deferred.length === 0 && sections.someday.length === 0)) && (
+                                        <TaskSection title="Next Actions" count={sections.nextActions.length}>
+                                            {renderTaskList(sections.nextActions)}
+                                        </TaskSection>
+                                    )}
+                                    {sections.deferred.length > 0 && (
+                                        <TaskSection title="Deferred" count={sections.deferred.length}>
+                                            {renderTaskList(sections.deferred)}
+                                        </TaskSection>
+                                    )}
+                                    {sections.waitingFor.length > 0 && (
+                                        <TaskSection title="Waiting For" count={sections.waitingFor.length}>
+                                            {renderTaskList(sections.waitingFor)}
+                                        </TaskSection>
+                                    )}
+                                    {sections.someday.length > 0 && (
+                                        <TaskSection title="Someday / Maybe" count={sections.someday.length}>
+                                            {renderTaskList(sections.someday)}
+                                        </TaskSection>
+                                    )}
+                                </>
+                            ) : (
+                                <div className="space-y-2">
+                                    {renderTaskList(visibleTasks)}
                                 </div>
-                            ))}
+                            )}
                         </div>
                     )}
                 </div>
