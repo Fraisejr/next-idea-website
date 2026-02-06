@@ -2120,7 +2120,7 @@ function ProjectsList() {
                 </div>
                 <h1 className="text-3xl font-bold text-gray-900 mb-4">Log in to Next Idea</h1>
                 <p className="text-gray-600 mb-8 max-w-md">Access your projects and tasks directly from your browser.</p>
-                <div id="apple-sign-in-button" className="transition-transform hover:scale-105"></div>
+                <div id="apple-sign-in-button" className="transition-transform hover:scale-105 empty:before:content-['Coming_soon'] empty:before:text-3xl empty:before:text-gray-400 empty:before:font-bold"></div>
             </div>
         );
     }

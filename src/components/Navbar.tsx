@@ -44,6 +44,12 @@ export default function Navbar() {
                         >
                             Tutorials
                         </Link>
+                        <Link
+                            href="/support"
+                            className="text-gray-600 hover:text-blue-600 font-medium transition-colors"
+                        >
+                            Support
+                        </Link>
 
                         {showLogout ? (
                             <button
