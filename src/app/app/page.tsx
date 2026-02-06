@@ -12,21 +12,20 @@ import { Loader2, ListTodo, CheckCircle2, Pencil, Check, X, ClipboardList, Plus,
 
 // Helper to categorize tasks
 const getTaskSection = (task: TaskRecord): 'due' | 'nextActions' | 'waitingFor' | 'deferred' | 'somedayMaybe' => {
-    // Priority 1: Due/Overdue (has active date)
+    // Priority 1: Deferred (Hidden until future date)
+    // Must come BEFORE 'due' because deferred tasks also have active dates, but shouldn't be shown as 'due' yet
+    if (task.fields.CD_hideuntildate?.value === 1 && task.fields.CD_date?.value && task.fields.CD_date.value > Date.now()) {
+        return 'deferred';
+    }
+
+    // Priority 2: Due/Overdue (has active date)
     if (task.fields.CD_dateactive?.value === 1 && task.fields.CD_date?.value) return 'due';
 
-    // Priority 2: Waiting For
+    // Priority 3: Waiting For
     if (task.fields.CD_waitingfor?.value === 1) return 'waitingFor';
 
-    // Priority 3: Someday/Maybe
+    // Priority 4: Someday/Maybe
     if (task.fields.CD_someday?.value === 1) return 'somedayMaybe';
-
-    // Priority 4: Deferred (Hidden until date)
-    // Note: If it's deferred AND has an active date, it might fall under priority 1 or 4 depending on logic.
-    // Usually 'Deferred' implies it's hidden from Next Actions but not necessarily "Due" in the sense of a deadline?
-    // User request: "Due and overdue tasks".
-    // If CD_hideuntildate is 1, it's deferred.
-    if (task.fields.CD_hideuntildate?.value === 1 && task.fields.CD_date?.value && task.fields.CD_date.value > Date.now()) return 'deferred';
 
     return 'nextActions';
 };
@@ -309,20 +308,13 @@ function ProjectsList() {
                     recordName: recordName, // FIXED: Added recordName for CloudKit compatibility
                     recordType: 'CD_Task',
                     fields: {
+                        // Inherit all fields from the local task state (which was initialized correctly in handleInsertTask)
+                        ...task.fields,
                         CD_name: { value: editTaskName },
+                        // Ensure we have a valid ID (though one was likely set in insert)
                         CD_id: { value: crypto.randomUUID() },
-                        // Inbox: omit project. Next Actions/Someday/Due: use Single Actions project. Project mode: use selectedProject.
-                        ...(viewMode === 'inbox' ? {}
-                            : (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due' || viewMode === 'waiting' || viewMode === 'deferred')
-                                ? (singleActionsProject?.recordName ? { CD_project: { value: singleActionsProject.recordName } } : {})
-                                : (selectedProject?.recordName ? { CD_project: { value: selectedProject.recordName } } : {})),
-                        ...(viewMode === 'someday' ? { CD_someday: { value: 1 } } : {}),
-                        ...(viewMode === 'due' ? { CD_date: { value: Date.now() }, CD_dateactive: { value: 1 } } : {}), // Default to Today & Active
-                        ...(viewMode === 'waiting' ? { CD_waitingfor: { value: 1 }, CD_someday: { value: 0 } } : {}),
-                        ...(viewMode === 'deferred' ? { CD_date: { value: new Date(new Date().setHours(24, 0, 0, 0)).getTime() }, CD_dateactive: { value: 1 }, CD_hideuntildate: { value: 1 }, CD_someday: { value: 0 } } : {}),
+                        // Ensure completion is 0
                         CD_completed: { value: 0 },
-                        // Use the order we set in the local state object
-                        CD_order: { value: task.fields.CD_order?.value || 0 },
                     }
                 };
 
@@ -481,10 +473,34 @@ function ProjectsList() {
                     : (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due' || viewMode === 'waiting' || viewMode === 'deferred')
                         ? (singleActionsProject?.recordName ? { CD_project: { value: singleActionsProject.recordName } } : {})
                         : (selectedProject?.recordName ? { CD_project: { value: selectedProject.recordName } } : {})),
+
+                // View specific defaults
                 ...(viewMode === 'someday' ? { CD_someday: { value: 1 } } : {}),
                 ...(viewMode === 'due' ? { CD_date: { value: Date.now() }, CD_dateactive: { value: 1 } } : {}),
                 ...(viewMode === 'waiting' ? { CD_waitingfor: { value: 1 }, CD_someday: { value: 0 } } : {}),
                 ...(viewMode === 'deferred' ? { CD_date: { value: new Date(new Date().setHours(24, 0, 0, 0)).getTime() }, CD_dateactive: { value: 1 }, CD_hideuntildate: { value: 1 }, CD_someday: { value: 0 } } : {}),
+
+                // Project View Contextual Defaults (Inherit from Sibling)
+                ...(viewMode === 'project' ? (
+                    // If sibling is Waiting For
+                    afterTask.fields.CD_waitingfor?.value === 1 ? { CD_waitingfor: { value: 1 }, CD_someday: { value: 0 } } :
+                        // If sibling is Someday
+                        afterTask.fields.CD_someday?.value === 1 ? { CD_someday: { value: 1 } } :
+                            // If sibling is Deferred (Hide Until + Active Date)
+                            (afterTask.fields.CD_hideuntildate?.value === 1 && afterTask.fields.CD_dateactive?.value === 1) ? {
+                                CD_date: { value: new Date(new Date().setHours(24, 0, 0, 0)).getTime() }, // Default to tomorrow like Deferred view
+                                CD_dateactive: { value: 1 },
+                                CD_hideuntildate: { value: 1 },
+                                CD_someday: { value: 0 }
+                            } :
+                                // If sibling is Due/Overdue (Active Date w/o Hide Until)
+                                (afterTask.fields.CD_dateactive?.value === 1 && afterTask.fields.CD_date?.value && afterTask.fields.CD_hideuntildate?.value !== 1) ? {
+                                    CD_date: { value: Date.now() }, // Default to Today
+                                    CD_dateactive: { value: 1 }
+                                } :
+                                    // Default to Next Actions (No flags)
+                                    { CD_someday: { value: 0 }, CD_waitingfor: { value: 0 }, CD_dateactive: { value: 0 } }
+                ) : {}),
                 CD_completed: { value: 0 },
                 CD_order: { value: newOrder }
             }
@@ -842,8 +858,17 @@ function ProjectsList() {
                     // But keep tasks that are currently being edited locally
                     Object.keys(merged).forEach(recordName => {
                         if (!freshTaskIds.has(recordName) && recordName !== editingTaskId && recordName !== 'new-task') {
-                            console.log(`[Cache] 🗑️ Removing task ${recordName} (no longer in CloudKit, likely completed elsewhere)`);
-                            delete merged[recordName];
+                            // Protect tasks modified locally in the last 10 seconds (likely just saved but not yet indexed by CloudKit query)
+                            const localTask = merged[recordName];
+                            const lastModified = localTask.fields.CD_modifieddate?.value || 0;
+                            const isRecent = (Date.now() - lastModified) < 10000;
+
+                            if (isRecent) {
+                                console.log(`[Cache] 🛡️ Protecting recent task ${recordName} from removal (waiting for index)`);
+                            } else {
+                                console.log(`[Cache] 🗑️ Removing task ${recordName} (no longer in CloudKit, likely completed elsewhere)`);
+                                delete merged[recordName];
+                            }
                         }
                     });
 
@@ -1873,7 +1898,14 @@ function ProjectsList() {
 
         visibleTasks.forEach(t => {
             const section = getTaskSection(t);
-            if (section === 'due') due.push(t);
+            if (section === 'due') {
+                due.push(t);
+                // ALSO add to Next Actions if it's not blocked (Waiting/Someday)
+                // This allows users to see it in their main list flow as well
+                if (!t.fields.CD_waitingfor?.value && !t.fields.CD_someday?.value) {
+                    nextActions.push(t);
+                }
+            }
             else if (section === 'waitingFor') waitingFor.push(t);
             else if (section === 'somedayMaybe') somedayMaybe.push(t);
             else if (section === 'deferred') deferred.push(t);
@@ -1963,9 +1995,14 @@ function ProjectsList() {
                 fieldsToSave[key] = { value: val };
             });
 
+            // Sync latest recordChangeTag from global state to avoid oplock errors
+            // (The selectedTaskDetails might be stale if background refresh happened)
+            const latestTaskVersion = tasks.find(t => t.recordName === updatedTask.recordName);
+            const currentChangeTag = latestTaskVersion?.recordChangeTag || updatedTask.recordChangeTag;
+
             const recordToSave = {
                 recordName: updatedTask.recordName,
-                recordChangeTag: updatedTask.recordChangeTag,
+                recordChangeTag: currentChangeTag,
                 fields: fieldsToSave
             };
 
