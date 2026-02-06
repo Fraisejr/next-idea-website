@@ -57,6 +57,25 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     onInsertTask,
     onEditClick
 }) => {
+    const formatDate = (dateTimestamp: number) => {
+        const date = new Date(dateTimestamp);
+        const now = new Date();
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const taskDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
+        if (taskDate.getTime() === today.getTime()) {
+            return { text: 'Today', className: 'text-blue-500 bg-blue-50' };
+        } else if (taskDate.getTime() === tomorrow.getTime()) {
+            return { text: 'Tomorrow', className: 'text-green-500 bg-green-50' };
+        } else if (taskDate < today) {
+            return { text: date.toLocaleDateString(), className: 'text-red-500 bg-red-50' };
+        } else {
+            return { text: date.toLocaleDateString(), className: 'text-green-500 bg-green-50' };
+        }
+    };
+
     // Helper to determine if we should enable drag
     const canDrag = (viewMode === 'project' || viewMode === 'inbox' || viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'waiting' || viewMode === 'deferred' || viewMode === 'due') && editingTaskId !== task.recordName;
 
@@ -114,7 +133,14 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                         </span>
                         {/* Meta Icons (Mini badges) */}
                         <div className="flex items-center gap-1 ml-2">
-                            {task.fields.CD_date?.value && task.fields.CD_dateactive?.value === 1 ? <span className="text-[10px] bg-red-50 text-red-500 px-1.5 py-0.5 rounded flex items-center gap-1"><Calendar className="w-3 h-3" /> {new Date(task.fields.CD_date.value).toLocaleDateString()}</span> : null}
+                            {task.fields.CD_date?.value && task.fields.CD_dateactive?.value === 1 ? (() => {
+                                const { text, className } = formatDate(task.fields.CD_date.value);
+                                return (
+                                    <span className={`text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1 ${className}`}>
+                                        <Calendar className="w-3 h-3" /> {text}
+                                    </span>
+                                );
+                            })() : null}
                             {(!task.fields.CD_someday?.value && !task.fields.CD_waitingfor?.value) ? <span title="Next Action" className="text-yellow-500"><Zap className="w-3 h-3" /></span> : null}
                             {task.fields.CD_waitingfor?.value === 1 && <span title="Waiting For" className="text-orange-400"><Hourglass className="w-3 h-3" /></span>}
                             {task.fields.CD_someday?.value === 1 && <span title="Someday" className="text-purple-400"><Moon className="w-3 h-3" /></span>}
