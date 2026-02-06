@@ -1526,12 +1526,15 @@ function ProjectsList() {
         // Filter based on view mode
         if (viewMode === 'project' && selectedProject) {
             // Project view: tasks belonging to selected project
+            // We now include ALL tasks (Next, Waiting, Someday, Deferred) because we have sections for them
             filtered = filtered.filter(t => {
                 if (t.fields.CD_completed?.value === 1) return false;
-                if (t.fields.CD_someday?.value === 1) return false;
-                if (t.fields.CD_waitingfor?.value === 1) return false;
+                // if (t.fields.CD_someday?.value === 1) return false; // REMOVED
+                // if (t.fields.CD_waitingfor?.value === 1) return false; // REMOVED
                 return t.fields.CD_project?.value === selectedProject.recordName;
             });
+
+            // REMOVED deferred exclusion logic as well
         } else if (viewMode === 'inbox') {
             // Inbox: tasks without project, not someday, not waiting
             filtered = filtered.filter(t => {
