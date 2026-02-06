@@ -1688,12 +1688,12 @@ function ProjectsList() {
         const isRecurring = task.fields.CD_recurring?.value === 1;
 
         // Optimistic UI updates
-        if (viewMode === 'project' && isCompleting) {
+        // Show animation for all list views (Project, Inbox, Next Actions, Due, Waiting, Deferred, Someday)
+        // Only exclude 'history' view if we ever add toggling there (which usually just un-completes)
+        if (viewMode !== 'history' && isCompleting) {
             setCompletingTaskIds(prev => new Set(prev).add(task.recordName));
             if (!isRecurring) {
                 // Only hide if not recurring (recurrence stays in list but updates date)
-                // Actually, for user feedback, maybe we still "flash" it or show a "Rescheduled" toast?
-                // For now, let's treat recurring task update as an immediate update in place.
                 setTimeout(() => {
                     setCompletingTaskIds(prev => {
                         const next = new Set(prev);
@@ -1710,6 +1710,7 @@ function ProjectsList() {
                         return next;
                     });
                 }, 500); // Shorter flash for update
+
             }
         }
 
