@@ -2424,26 +2424,21 @@ function ProjectsList() {
                         <div className="space-y-6">
                             {viewMode === 'project' && sections ? (
                                 <>
-                                    {(sections.nextActions.length > 0 || (sections.waitingFor.length === 0 && sections.deferred.length === 0 && sections.someday.length === 0)) && (
-                                        <TaskSection title="Next Actions" count={sections.nextActions.length}>
-                                            {renderTaskList(sections.nextActions)}
-                                        </TaskSection>
-                                    )}
-                                    {sections.deferred.length > 0 && (
-                                        <TaskSection title="Deferred" count={sections.deferred.length}>
-                                            {renderTaskList(sections.deferred)}
-                                        </TaskSection>
-                                    )}
-                                    {sections.waitingFor.length > 0 && (
-                                        <TaskSection title="Waiting For" count={sections.waitingFor.length}>
-                                            {renderTaskList(sections.waitingFor)}
-                                        </TaskSection>
-                                    )}
-                                    {sections.someday.length > 0 && (
-                                        <TaskSection title="Someday / Maybe" count={sections.someday.length}>
-                                            {renderTaskList(sections.someday)}
-                                        </TaskSection>
-                                    )}
+                                    <TaskSection title="Next Actions" count={sections.nextActions.length}>
+                                        {renderTaskList(sections.nextActions)}
+                                    </TaskSection>
+
+                                    <TaskSection title="Deferred" count={sections.deferred.length}>
+                                        {renderTaskList(sections.deferred)}
+                                    </TaskSection>
+
+                                    <TaskSection title="Waiting For" count={sections.waitingFor.length}>
+                                        {renderTaskList(sections.waitingFor)}
+                                    </TaskSection>
+
+                                    <TaskSection title="Someday / Maybe" count={sections.someday.length}>
+                                        {renderTaskList(sections.someday)}
+                                    </TaskSection>
                                 </>
                             ) : (
                                 <div className="space-y-2">
