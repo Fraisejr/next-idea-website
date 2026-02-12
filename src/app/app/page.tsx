@@ -56,6 +56,14 @@ function ProjectsList() {
 
     // Details Panel State
     const [selectedTaskDetails, setSelectedTaskDetails] = useState<TaskRecord | null>(null);
+    const [linkInput, setLinkInput] = useState('');
+
+    // Sync link input when selected task changes
+    useEffect(() => {
+        if (selectedTaskDetails) {
+            setLinkInput(selectedTaskDetails.fields.CD_link?.value || '');
+        }
+    }, [selectedTaskDetails?.recordName]);
 
     // ============ TASK CACHE SYSTEM ============
     // Global cache for all active (non-completed) tasks
@@ -763,7 +771,7 @@ function ProjectsList() {
                         'CD_name', 'CD_id', 'CD_order', 'CD_project', 'CD_completed',
                         'CD_someday', 'CD_waitingfor', 'CD_dateactive',
                         'CD_date', 'CD_hideuntildate', 'CD_recurring', 'CD_recurrence', 'CD_recurrencetype',
-                        'CD_modifieddate'
+                        'CD_modifieddate', 'CD_link'
                     ],
                     resultsLimit: 500 // Fetch all active tasks
                 };
@@ -834,7 +842,7 @@ function ProjectsList() {
                         'CD_name', 'CD_id', 'CD_order', 'CD_project', 'CD_completed',
                         'CD_someday', 'CD_waitingfor', 'CD_dateactive',
                         'CD_date', 'CD_hideuntildate', 'CD_recurring', 'CD_recurrence', 'CD_recurrencetype',
-                        'CD_modifieddate'
+                        'CD_modifieddate', 'CD_link'
                     ],
                     resultsLimit: 500
                 };
@@ -2152,6 +2160,109 @@ function ProjectsList() {
                 onShowShortcuts={setShowShortcuts}
             />
 
+            {/* Main Content: Tasks */}
+            <div className="flex-1 flex flex-col overflow-hidden bg-white">
+                <div className="p-6 border-b border-gray-100 flex justify-between items-center">
+                    <div className="flex items-center gap-3">
+                        <h1 className="text-2xl font-bold text-gray-900">
+                            {viewMode === 'project'
+                                ? (selectedProject?.fields.CD_name?.value || 'Select a Project')
+                                : viewMode === 'inbox' ? 'Inbox'
+                                    : viewMode === 'next_actions' ? 'Next actions'
+                                        : viewMode === 'waiting' ? 'Waiting for'
+                                            : viewMode === 'deferred' ? 'Deferred'
+                                                : viewMode === 'someday' ? 'Someday / Maybe'
+                                                    : viewMode === 'due' ? 'Due and Overdue'
+                                                        : 'Completed Tasks'
+                            }
+                        </h1>
+                        {(viewMode === 'project' && selectedProject || viewMode === 'inbox' || viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due' || viewMode === 'waiting' || viewMode === 'deferred') && (
+                            <button
+                                onClick={handleCreateTask}
+                                className="p-1 rounded-full text-gray-400 hover:bg-blue-50 hover:text-blue-600 transition-colors"
+                                title="New Task (Cmd+N)"
+                            >
+                                <Plus className="w-6 h-6" />
+                            </button>
+                        )}
+                    </div>
+                </div>
+
+                {taskError && (
+                    <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2 text-red-700 text-sm">
+                        <X className="w-4 h-4" />
+                        <span>{taskError}</span>
+                    </div>
+                )}
+
+                <div className="flex-1 overflow-y-auto p-6">
+                    {loadingTasks ? (
+                        <div className="flex justify-center p-10">
+                            <Loader2 className="w-8 h-8 animate-spin text-gray-300" />
+                        </div>
+                    ) : visibleTasks.length === 0 ? (
+                        <div className="text-center py-20 bg-gray-50 rounded-2xl border border-dashed border-gray-200">
+                            {viewMode === 'project' ? (
+                                <>
+                                    <ListTodo className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+                                    <p className="text-gray-500">No active tasks in this project.</p>
+                                </>
+                            ) : viewMode === 'inbox' ? (
+                                <>
+                                    <Inbox className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+                                    <p className="text-gray-500">Inbox is empty.</p>
+                                </>
+                            ) : viewMode === 'next_actions' ? (
+                                <>
+                                    <Zap className="w-12 h-12 text-purple-200 mx-auto mb-4" />
+                                    <p className="text-gray-500">No next actions available.</p>
+                                </>
+                            ) : viewMode === 'someday' ? (
+                                <>
+                                    <CalendarClock className="w-12 h-12 text-amber-200 mx-auto mb-4" />
+                                    <p className="text-gray-500">No someday tasks.</p>
+                                </>
+                            ) : (
+                                <>
+                                    <CheckCircle2 className="w-12 h-12 text-green-200 mx-auto mb-4" />
+                                    <p className="text-gray-500">No completed tasks yet.</p>
+                                </>
+                            )}
+                        </div>
+                    ) : (
+                        <div className="space-y-6">
+                            {viewMode === 'project' && sections ? (
+                                <>
+                                    <TaskSection title="Due / Overdue" count={sections.due.length}>
+                                        {renderTaskList(sections.due)}
+                                    </TaskSection>
+
+                                    <TaskSection title="Next Actions" count={sections.nextActions.length}>
+                                        {renderTaskList(sections.nextActions)}
+                                    </TaskSection>
+
+                                    <TaskSection title="Deferred" count={sections.deferred.length}>
+                                        {renderTaskList(sections.deferred)}
+                                    </TaskSection>
+
+                                    <TaskSection title="Waiting For" count={sections.waitingFor.length}>
+                                        {renderTaskList(sections.waitingFor)}
+                                    </TaskSection>
+
+                                    <TaskSection title="Someday / Maybe" count={sections.someday.length}>
+                                        {renderTaskList(sections.someday)}
+                                    </TaskSection>
+                                </>
+                            ) : (
+                                <div className="space-y-2">
+                                    {renderTaskList(visibleTasks)}
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+            </div>
+
             {/* Keyboard Shortcuts Modal */}
             {showShortcuts && (
                 <div className="absolute inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
@@ -2350,7 +2461,7 @@ function ProjectsList() {
 
                             <hr className="border-gray-100" />
 
-                            {/* Toggles */}
+
                             <div className="space-y-4">
                                 {/* Next Action (Calculated: !someday && !waiting) */}
                                 <div className="flex items-center justify-between group cursor-pointer" onClick={() => toggleStatus('next')}>
@@ -2398,9 +2509,60 @@ function ProjectsList() {
                                     </div>
                                 </div>
 
+                                {/* Link Field */}
+                                <div className="pt-2 border-t border-gray-50">
+                                    <label className="block text-xs font-medium text-gray-500 mb-1.5 ml-1">Link</label>
+                                    <div className="flex gap-2">
+                                        <div className="relative flex-1">
+                                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                                <svg className="w-4 h-4 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                                                    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+                                                </svg>
+                                            </div>
+                                            <input
+                                                type="text"
+                                                className="w-full pl-9 pr-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-100 focus:border-blue-400 outline-none transition-all placeholder:text-gray-400"
+                                                placeholder="Add a link..."
+                                                value={linkInput}
+                                                onChange={(e) => setLinkInput(e.target.value)}
+                                                onBlur={() => {
+                                                    if (selectedTaskDetails && linkInput !== (selectedTaskDetails.fields.CD_link?.value || '')) {
+                                                        handleUpdateTaskDetail('CD_link', linkInput);
+                                                    }
+                                                }}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter') {
+                                                        e.currentTarget.blur(); // Trigger blur to save
+                                                    }
+                                                }}
+                                            />
+                                        </div>
+                                        {selectedTaskDetails.fields.CD_link?.value && (
+                                            <a
+                                                href={selectedTaskDetails.fields.CD_link.value.startsWith('http') ? selectedTaskDetails.fields.CD_link.value : `https://${selectedTaskDetails.fields.CD_link.value}`}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="p-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-colors flex items-center justify-center"
+                                                title="Open Link"
+                                            >
+                                                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                                                    <polyline points="15 3 21 3 21 9"></polyline>
+                                                    <line x1="10" y1="14" x2="21" y2="3"></line>
+                                                </svg>
+                                            </a>
+                                        )}
+                                    </div>
+                                </div>
+
 
                             </div>
                         </div>
+
+
+
+
 
                         {/* Footer info */}
                         <div className="p-4 bg-gray-50 text-xs text-gray-400 border-t border-gray-100 flex justify-between">
@@ -2409,111 +2571,10 @@ function ProjectsList() {
                         </div>
                     </div>
                 </div>
-            )}
+            )
+            }
 
-            {/* Main Content: Tasks */}
-            <div className="flex-1 flex flex-col overflow-hidden bg-white">
-                <div className="p-6 border-b border-gray-100 flex justify-between items-center">
-                    <div className="flex items-center gap-3">
-                        <h1 className="text-2xl font-bold text-gray-900">
-                            {viewMode === 'project'
-                                ? (selectedProject?.fields.CD_name?.value || 'Select a Project')
-                                : viewMode === 'inbox' ? 'Inbox'
-                                    : viewMode === 'next_actions' ? 'Next actions'
-                                        : viewMode === 'waiting' ? 'Waiting for'
-                                            : viewMode === 'deferred' ? 'Deferred'
-                                                : viewMode === 'someday' ? 'Someday / Maybe'
-                                                    : viewMode === 'due' ? 'Due and Overdue'
-                                                        : 'Completed Tasks'
-                            }
-                        </h1>
-                        {(viewMode === 'project' && selectedProject || viewMode === 'inbox' || viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due' || viewMode === 'waiting' || viewMode === 'deferred') && (
-                            <button
-                                onClick={handleCreateTask}
-                                className="p-1 rounded-full text-gray-400 hover:bg-blue-50 hover:text-blue-600 transition-colors"
-                                title="New Task (Cmd+N)"
-                            >
-                                <Plus className="w-6 h-6" />
-                            </button>
-                        )}
-                    </div>
-                </div>
-
-                {taskError && (
-                    <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2 text-red-700 text-sm">
-                        <X className="w-4 h-4" />
-                        <span>{taskError}</span>
-                    </div>
-                )}
-
-                <div className="flex-1 overflow-y-auto p-6">
-                    {loadingTasks ? (
-                        <div className="flex justify-center p-10">
-                            <Loader2 className="w-8 h-8 animate-spin text-gray-300" />
-                        </div>
-                    ) : visibleTasks.length === 0 ? (
-                        <div className="text-center py-20 bg-gray-50 rounded-2xl border border-dashed border-gray-200">
-                            {viewMode === 'project' ? (
-                                <>
-                                    <ListTodo className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-                                    <p className="text-gray-500">No active tasks in this project.</p>
-                                </>
-                            ) : viewMode === 'inbox' ? (
-                                <>
-                                    <Inbox className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-                                    <p className="text-gray-500">Inbox is empty.</p>
-                                </>
-                            ) : viewMode === 'next_actions' ? (
-                                <>
-                                    <Zap className="w-12 h-12 text-purple-200 mx-auto mb-4" />
-                                    <p className="text-gray-500">No next actions available.</p>
-                                </>
-                            ) : viewMode === 'someday' ? (
-                                <>
-                                    <CalendarClock className="w-12 h-12 text-amber-200 mx-auto mb-4" />
-                                    <p className="text-gray-500">No someday tasks.</p>
-                                </>
-                            ) : (
-                                <>
-                                    <CheckCircle2 className="w-12 h-12 text-green-200 mx-auto mb-4" />
-                                    <p className="text-gray-500">No completed tasks yet.</p>
-                                </>
-                            )}
-                        </div>
-                    ) : (
-                        <div className="space-y-6">
-                            {viewMode === 'project' && sections ? (
-                                <>
-                                    <TaskSection title="Due / Overdue" count={sections.due.length}>
-                                        {renderTaskList(sections.due)}
-                                    </TaskSection>
-
-                                    <TaskSection title="Next Actions" count={sections.nextActions.length}>
-                                        {renderTaskList(sections.nextActions)}
-                                    </TaskSection>
-
-                                    <TaskSection title="Deferred" count={sections.deferred.length}>
-                                        {renderTaskList(sections.deferred)}
-                                    </TaskSection>
-
-                                    <TaskSection title="Waiting For" count={sections.waitingFor.length}>
-                                        {renderTaskList(sections.waitingFor)}
-                                    </TaskSection>
-
-                                    <TaskSection title="Someday / Maybe" count={sections.someday.length}>
-                                        {renderTaskList(sections.someday)}
-                                    </TaskSection>
-                                </>
-                            ) : (
-                                <div className="space-y-2">
-                                    {renderTaskList(visibleTasks)}
-                                </div>
-                            )}
-                        </div>
-                    )}
-                </div>
-            </div>
-        </div>
+        </div >
     );
 }
 

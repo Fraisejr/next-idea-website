@@ -13,7 +13,6 @@ const guides = [
         steps: [
             "A project is an outcome that you want to achieve that requires more than one physical action to complete.",
             "You can create a new project either using the + button at the top of the Projects tab, or by typing the new project's name when selecting a project on a task.",
-            "If you mark a project as sequential, only the first task in that project will be visible in your task lists.",
             "Reorder your projects to keep the most important ones at the top of the list.",
             "Mark a project as 'On hold' by swiping left on it if you don't plan to work on it at the moment",
             "Once all the tasks in a project are completed, you can swipe to the right on the project to mark it as completed."

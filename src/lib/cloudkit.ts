@@ -43,6 +43,7 @@ export interface TaskRecord {
         CD_recurrence?: { value: number }; // Int16
         CD_recurrencetype?: { value: string }; // String
         CD_hideuntildate?: { value: number }; // 0/1
+        CD_link?: { value: string }; // URL String
     };
 }
 
