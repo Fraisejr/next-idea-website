@@ -17,7 +17,9 @@ import {
     List,
     SquarePlay,
     Users,
-    Calendar
+    Calendar,
+    Search,
+    XCircle
 } from 'lucide-react';
 import React from 'react';
 
@@ -60,6 +62,10 @@ type SidebarProps = {
         history: number;
         projects: Record<string, number>;
     };
+    searchQuery: string;
+    setSearchQuery: (query: string) => void;
+    projectsWithMatches: Set<string>;
+    listsWithMatches: Set<string>;
 };
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -89,14 +95,121 @@ export const Sidebar: React.FC<SidebarProps> = ({
     onDropDeferred,
     onDropSomeday,
     onShowShortcuts,
-    counts
+    counts,
+    searchQuery,
+    setSearchQuery,
+    projectsWithMatches,
+    listsWithMatches
 }) => {
+    const [isSearchOpen, setIsSearchOpen] = React.useState(false);
+    const searchInputRef = React.useRef<HTMLInputElement>(null);
+
+    // Toggle search with 'f' key
+    React.useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'f' && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
+                // Determine if we should hijack 'f'
+                // If user is properly typing in an input, don't hijack.
+                // But we want to allow 'f' to OPEN search.
+                if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+                    return;
+                }
+
+                e.preventDefault();
+                setIsSearchOpen(true);
+                setTimeout(() => searchInputRef.current?.focus(), 50);
+            }
+
+            // ESC to close search
+            if (e.key === 'Escape' && isSearchOpen) {
+                if (searchQuery) {
+                    setSearchQuery(''); // First ESC clears query
+                } else {
+                    setIsSearchOpen(false); // Second ESC closes bar
+                    // If we closed bar, we should probably clear query too if we want to reset? 
+                    // User requirement: "close the search bar while maintaining the filtering"
+                    // So we do NOT clear query on close if it has value.
+                    // Wait, if I press ESC and query is empty, I close.
+                    // If query has text, user logic: "close the search bar while maintaining the filtering".
+                    // Typical behavior: ESC clears. 
+                    // Let's rely on the requirement: "close the search bar while maintaining the filtering"
+                    // So: ESC -> Close Bar (keep query). 
+                    // BUT: "show a button next to the Search button to clear the filter"
+                }
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [isSearchOpen, searchQuery, setSearchQuery]);
+
+    const handleClearSearch = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        setSearchQuery('');
+        // If bar is closed, stays closed. If open, stays open?
+    };
+
+    const isHighlightList = (mode: string) => {
+        // Highlight if list contains matches (listsWithMatches) AND we are not currently in that mode
+        // Actually user said: "highlight that list or project so that it's clear that I can click on it to switch to that list or project"
+        // If we are already selected, we don't necessarily need highlight or maybe we do to show "matches here".
+        // Let's highlight if matches exist.
+        return searchQuery.trim() && listsWithMatches.has(mode);
+    };
+
+    const isHighlightProject = (pid: string) => {
+        return searchQuery.trim() && projectsWithMatches.has(pid);
+    };
+
     return (
         <div className="w-80 bg-gray-50 border-r border-gray-100 flex flex-col fixed md:relative h-full z-10 transition-transform md:translate-x-0 -translate-x-full">
-            <div className="p-4 border-b border-gray-100 bg-white">
-                <h1 className="font-bold text-xl bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-                    Next Idea
-                </h1>
+            <div className="p-4 border-b border-gray-100 bg-white flex items-center justify-between h-[60px]">
+                {isSearchOpen ? (
+                    <div className="flex items-center w-full gap-2 animate-in fade-in slide-in-from-left-2 duration-200">
+                        <Search className="w-4 h-4 text-gray-400" />
+                        <input
+                            ref={searchInputRef}
+                            type="text"
+                            placeholder="Filter tasks... (Esc to close)"
+                            className="flex-1 bg-transparent border-none outline-none text-sm placeholder:text-gray-400"
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                    setIsSearchOpen(false);
+                                }
+                            }}
+                            autoFocus
+                        />
+                        <button onClick={() => setIsSearchOpen(false)} className="text-gray-400 hover:text-gray-600">
+                            <X className="w-4 h-4" />
+                        </button>
+                    </div>
+                ) : (
+                    <>
+                        <h1 className="font-bold text-xl bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent truncate">
+                            Next Idea
+                        </h1>
+                        <div className="flex items-center gap-1">
+                            {searchQuery && (
+                                <button
+                                    onClick={handleClearSearch}
+                                    className="p-1.5 text-gray-400 hover:text-red-500 rounded-full transition-colors"
+                                    title="Clear Filter"
+                                >
+                                    <XCircle className="w-5 h-5" />
+                                </button>
+                            )}
+                            <button
+                                onClick={() => setIsSearchOpen(true)}
+                                className={`p-1.5 rounded-full transition-colors ${searchQuery ? 'text-indigo-600 bg-indigo-50' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'}`}
+                                title="Search (F)"
+                            >
+                                <Search className="w-5 h-5" />
+                            </button>
+                        </div>
+                    </>
+                )}
             </div>
 
             <div className="flex-1 overflow-y-auto p-2 space-y-1">
@@ -135,9 +248,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             }`}
                     >
                         <Inbox className="w-5 h-5 text-blue-500" />
-                        <span className="font-medium flex-1">Inbox</span>
+                        <span className={`font-medium flex-1 ${isHighlightList('inbox') ? 'text-indigo-600 font-semibold' : ''}`}>Inbox</span>
                         {counts?.inbox ? (
-                            <span className="bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full text-xs font-medium">
+                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${isHighlightList('inbox') ? 'bg-indigo-100 text-indigo-700' : 'bg-blue-100 text-blue-600'}`}>
                                 {counts.inbox}
                             </span>
                         ) : null}
@@ -172,9 +285,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             }`}
                     >
                         <Calendar className={`w-5 h-5 ${viewMode === 'due' ? 'text-green-500' : 'text-gray-400'}`} />
-                        <span className="font-medium flex-1">Due</span>
+                        <span className={`font-medium flex-1 ${isHighlightList('due') ? 'text-indigo-600 font-semibold' : ''}`}>Due</span>
                         {counts?.due ? (
-                            <span className="bg-green-100 text-green-600 px-2 py-0.5 rounded-full text-xs font-medium">
+                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${isHighlightList('due') ? 'bg-indigo-100 text-indigo-700' : 'bg-green-100 text-green-600'}`}>
                                 {counts.due}
                             </span>
                         ) : null}
@@ -210,9 +323,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             }`}
                     >
                         <SquarePlay className={`w-5 h-5 ${viewMode === 'next_actions' ? 'text-blue-500' : 'text-gray-400'}`} />
-                        <span className="font-medium flex-1">Next</span>
+                        <span className={`font-medium flex-1 ${isHighlightList('next_actions') ? 'text-indigo-600 font-semibold' : ''}`}>Next</span>
                         {counts?.nextActions ? (
-                            <span className="bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full text-xs font-medium">
+                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${isHighlightList('next_actions') ? 'bg-indigo-100 text-indigo-700' : 'bg-blue-100 text-blue-600'}`}>
                                 {counts.nextActions}
                             </span>
                         ) : null}
@@ -247,9 +360,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             }`}
                     >
                         <Users className={`w-5 h-5 ${viewMode === 'waiting' ? 'text-orange-500' : 'text-gray-400'}`} />
-                        <span className="font-medium flex-1">Waiting for</span>
+                        <span className={`font-medium flex-1 ${isHighlightList('waiting') ? 'text-indigo-600 font-semibold' : ''}`}>Waiting for</span>
                         {counts?.waiting ? (
-                            <span className="bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full text-xs font-medium">
+                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${isHighlightList('waiting') ? 'bg-indigo-100 text-indigo-700' : 'bg-orange-100 text-orange-600 '}`}>
                                 {counts.waiting}
                             </span>
                         ) : null}
@@ -284,9 +397,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             }`}
                     >
                         <CalendarClock className={`w-5 h-5 ${viewMode === 'deferred' ? 'text-gray-600' : 'text-gray-400'}`} />
-                        <span className="font-medium flex-1">Deferred</span>
+                        <span className={`font-medium flex-1 ${isHighlightList('deferred') ? 'text-indigo-600 font-semibold' : ''}`}>Deferred</span>
                         {counts?.deferred ? (
-                            <span className="bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full text-xs font-medium">
+                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${isHighlightList('deferred') ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-200 text-gray-600'}`}>
                                 {counts.deferred}
                             </span>
                         ) : null}
@@ -321,9 +434,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             }`}
                     >
                         <List className={`w-5 h-5 ${viewMode === 'someday' ? 'text-[#92400e]' : 'text-gray-400'}`} />
-                        <span className="font-medium flex-1">Someday</span>
+                        <span className={`font-medium flex-1 ${isHighlightList('someday') ? 'text-indigo-600 font-semibold' : ''}`}>Someday</span>
                         {counts?.someday ? (
-                            <span className="bg-[#fdf4eb] text-[#92400e] px-2 py-0.5 rounded-full text-xs font-medium">
+                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${isHighlightList('someday') ? 'bg-indigo-100 text-indigo-700' : 'bg-[#fdf4eb] text-[#92400e]'}`}>
                                 {counts.someday}
                             </span>
                         ) : null}
@@ -353,7 +466,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         <>
                             {/* Active Projects */}
                             {projects
-                                .filter(p => (!p.fields.CD_focus || p.fields.CD_focus.value !== 0) || p.fields.CD_singleactions?.value === 1)
+                                .filter(p => {
+                                    const isActive = (!p.fields.CD_focus || p.fields.CD_focus.value !== 0) || p.fields.CD_singleactions?.value === 1;
+                                    if (!isActive) return false;
+
+                                    // Search Filter: Show if name matches OR if project contains matching tasks
+                                    if (searchQuery.trim()) {
+                                        const nameMatch = p.fields.CD_name?.value.toLowerCase().includes(searchQuery.toLowerCase());
+                                        const hasMatchingTasks = projectsWithMatches.has(p.recordName);
+                                        return nameMatch || hasMatchingTasks;
+                                    }
+                                    return true;
+                                })
                                 .map(project => (
                                     <div
                                         key={project.recordName}
@@ -418,7 +542,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                                         className="w-4 h-4 text-gray-400"
                                                         style={project.fields.CD_color?.value ? { color: project.fields.CD_color.value } : {}}
                                                     />
-                                                    <span className="truncate flex-1">{project.fields.CD_name?.value || 'Untitled'}</span>
+                                                    <span className={`truncate flex-1 ${isHighlightProject(project.recordName) ? 'text-indigo-600 font-semibold' : ''}`}>{project.fields.CD_name?.value || 'Untitled'}</span>
                                                     <div className="flex items-center gap-2">
                                                         {counts?.projects?.[project.recordName] ? (
                                                             <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full text-xs font-medium group-hover:bg-white group-hover:text-blue-600 transition-colors">
@@ -450,7 +574,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                         </h3>
                                     </div>
                                     {projects
-                                        .filter(p => p.fields.CD_focus?.value === 0 && p.fields.CD_singleactions?.value !== 1)
+                                        .filter(p => {
+                                            const isHold = p.fields.CD_focus?.value === 0 && p.fields.CD_singleactions?.value !== 1;
+                                            if (!isHold) return false;
+
+                                            // Search Filter for Hold Projects too
+                                            if (searchQuery.trim()) {
+                                                const nameMatch = p.fields.CD_name?.value.toLowerCase().includes(searchQuery.toLowerCase());
+                                                const hasMatchingTasks = projectsWithMatches.has(p.recordName);
+                                                return nameMatch || hasMatchingTasks;
+                                            }
+                                            return true;
+                                        })
                                         .map(project => (
                                             <div
                                                 key={project.recordName}
@@ -509,7 +644,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                                         </div>
                                                     ) : (
                                                         <div className="flex items-center justify-between w-full">
-                                                            <span className="truncate">{project.fields.CD_name?.value || 'Untitled'}</span>
+                                                            <span className={`truncate ${isHighlightProject(project.recordName) ? 'text-indigo-600 font-semibold' : ''}`}>{project.fields.CD_name?.value || 'Untitled'}</span>
                                                             <div className="flex items-center gap-2">
                                                                 {counts?.projects?.[project.recordName] ? (
                                                                     <span className="bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full text-xs font-medium">

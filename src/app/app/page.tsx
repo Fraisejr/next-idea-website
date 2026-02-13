@@ -65,6 +65,9 @@ function ProjectsList() {
     const [selectedTaskDetails, setSelectedTaskDetails] = useState<TaskRecord | null>(null);
     const [linkInput, setLinkInput] = useState('');
 
+    // Search State
+    const [searchQuery, setSearchQuery] = useState('');
+
     // Sync link input when selected task changes
     useEffect(() => {
         if (selectedTaskDetails) {
@@ -172,6 +175,49 @@ function ProjectsList() {
 
         return counts;
     }, [allTasksCache, projects]);
+
+    // Search Logic
+    const { projectsWithMatches, listsWithMatches, matchingTaskIds } = useMemo(() => {
+        if (!searchQuery.trim()) {
+            return {
+                projectsWithMatches: new Set<string>(),
+                listsWithMatches: new Set<string>(),
+                matchingTaskIds: new Set<string>()
+            };
+        }
+
+        const query = searchQuery.toLowerCase();
+        const projMatches = new Set<string>();
+        const listMatches = new Set<string>();
+        const taskMatches = new Set<string>();
+
+        Object.values(allTasksCache).forEach(task => {
+            if (task.fields.CD_name?.value.toLowerCase().includes(query)) {
+                taskMatches.add(task.recordName);
+
+                // Identify which list/project this task belongs to
+                // Logic mirrors getTaskSection / Sidebar counts logic but simplified for matching
+                if (task.fields.CD_project?.value) {
+                    projMatches.add(task.fields.CD_project.value);
+                }
+
+                // Add to generic lists if applicable
+                const section = getTaskSection(task);
+                if (section === 'due') listMatches.add('due');
+                if (section === 'nextActions') listMatches.add('next_actions');
+                if (section === 'waitingFor') listMatches.add('waiting');
+                if (section === 'somedayMaybe') listMatches.add('someday');
+                if (section === 'deferred') listMatches.add('deferred');
+
+                // Inbox check
+                if (!task.fields.CD_project?.value && task.fields.CD_waitingfor?.value !== 1 && task.fields.CD_someday?.value !== 1) {
+                    listMatches.add('inbox');
+                }
+            }
+        });
+
+        return { projectsWithMatches: projMatches, listsWithMatches: listMatches, matchingTaskIds: taskMatches };
+    }, [searchQuery, allTasksCache]);
     const [cacheInitialized, setCacheInitialized] = useState(false);
     const [lastCacheRefresh, setLastCacheRefresh] = useState<number>(0);
     const CACHE_REFRESH_INTERVAL = 15000; // 15 seconds
@@ -2053,33 +2099,43 @@ function ProjectsList() {
         setSelectedTaskDetails(task);
     };
 
-    const renderTaskList = (tasksToRender: TaskRecord[]) => (
-        <>
-            {tasksToRender.map(task => (
-                <TaskItem
-                    key={task.recordName}
-                    task={task}
-                    viewMode={viewMode}
-                    editingTaskId={editingTaskId}
-                    dragOverTaskId={dragOverTaskId}
-                    projects={projects}
-                    editTaskName={editTaskName}
-                    setEditTaskName={setEditTaskName}
-                    onDragStart={handleDragStart}
-                    onDragOver={handleTaskDragOver}
-                    onDragEnter={handleTaskDragEnter}
-                    onDragLeave={handleTaskDragLeave}
-                    onDrop={handleTaskDrop}
-                    onToggleComplete={handleToggleComplete}
-                    onTaskClick={handleTaskClick}
-                    onSave={handleTaskSave}
-                    onCancel={handleTaskCancel}
-                    onInsertTask={handleInsertTask}
-                    onEditClick={handleTaskEditClick}
-                />
-            ))}
-        </>
-    );
+    const renderTaskList = (tasksToRender: TaskRecord[]) => {
+        // Filter passed tasks based on search
+        const filteredTasks = tasksToRender.filter(task => {
+            if (searchQuery.trim() && !matchingTaskIds.has(task.recordName)) {
+                return false;
+            }
+            return true;
+        });
+
+        return (
+            <>
+                {filteredTasks.map(task => (
+                    <TaskItem
+                        key={task.recordName}
+                        task={task}
+                        viewMode={viewMode}
+                        editingTaskId={editingTaskId}
+                        dragOverTaskId={dragOverTaskId}
+                        projects={projects}
+                        editTaskName={editTaskName}
+                        setEditTaskName={setEditTaskName}
+                        onDragStart={handleDragStart}
+                        onDragOver={handleTaskDragOver}
+                        onDragEnter={handleTaskDragEnter}
+                        onDragLeave={handleTaskDragLeave}
+                        onDrop={handleTaskDrop}
+                        onToggleComplete={handleToggleComplete}
+                        onTaskClick={handleTaskClick}
+                        onSave={handleTaskSave}
+                        onCancel={handleTaskCancel}
+                        onInsertTask={handleInsertTask}
+                        onEditClick={handleTaskEditClick}
+                    />
+                ))}
+            </>
+        );
+    };
 
     // Modified to accept batch updates or single field
     const handleUpdateTaskDetail = async (fieldOrUpdates: keyof TaskRecord['fields'] | Record<string, any>, value?: any) => {
@@ -2278,10 +2334,13 @@ function ProjectsList() {
                 onDropWaiting={handleDropWaiting}
                 onDropDeferred={handleDropDeferred}
                 onDropSomeday={handleDropSomeday}
-                onShowShortcuts={setShowShortcuts}
+                onShowShortcuts={(show) => setShowShortcuts(show)}
                 counts={sidebarCounts}
+                searchQuery={searchQuery}
+                setSearchQuery={setSearchQuery}
+                projectsWithMatches={projectsWithMatches}
+                listsWithMatches={listsWithMatches}
             />
-
             {/* Main Content: Tasks */}
             <div className="flex-1 flex flex-col overflow-hidden bg-white">
                 <div className="p-6 border-b border-gray-100 flex justify-between items-center">
