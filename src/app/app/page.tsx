@@ -1175,7 +1175,16 @@ function ProjectsList() {
             newProjects.splice(insertIndex, 0, sourceProject);
 
             // Optimistic Update
-            setProjects(newProjects);
+            // We must update the CD_order field in the state objects so the UI reflects the new numbers immediately
+            const updatedProjects = newProjects.map((p, index) => ({
+                ...p,
+                fields: {
+                    ...p.fields,
+                    CD_order: { value: index }
+                }
+            }));
+
+            setProjects(updatedProjects);
 
             // Save new order
             try {
@@ -1185,17 +1194,26 @@ function ProjectsList() {
                 // Re-assign CD_order for all projects (simple normalized ordering)
                 // We'll update ALL projects to ensure consistency, or just the affected range.
                 // Updating all is safer for 'order' fields to keep them clean (0, 1, 2...).
-                const recordsToUpdate = newProjects.map((p, index) => ({
-                    ...p,
+                const recordsToUpdate = updatedProjects.map(p => ({
+                    recordName: p.recordName,
+                    recordType: 'CD_Project',
+                    recordChangeTag: p.recordChangeTag,
                     fields: {
-                        ...p.fields,
-                        CD_order: { value: index }
+                        CD_order: p.fields.CD_order
                     }
                 }));
 
                 // Only save if order actually changed (optimization)
                 // But for now, safe simply
-                await privateDB.saveRecords(recordsToUpdate, { zoneID });
+                const result = await privateDB.saveRecords(recordsToUpdate, { zoneID });
+                if (result.hasErrors) throw new Error(result.errors[0].message);
+
+                // Update change tags
+                const savedRecords = result.records;
+                setProjects(currentProjects => currentProjects.map(p => {
+                    const saved = savedRecords.find((r: any) => r.recordName === p.recordName);
+                    return saved ? { ...p, recordChangeTag: saved.recordChangeTag } : p;
+                }));
 
                 console.log('Project order updated successfully');
             } catch (err: any) {
@@ -1601,25 +1619,35 @@ function ProjectsList() {
         }
     };
 
-    const handleTaskDragOver = (e: React.DragEvent) => {
+    const handleTaskDragOver = (e: React.DragEvent, task: TaskRecord) => {
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
-    };
 
-    const handleTaskDragEnter = (task: TaskRecord) => {
-        if (task.recordName !== editingTaskId) {
+        // Calculate if top or bottom half
+        const rect = e.currentTarget.getBoundingClientRect();
+        const y = e.clientY - rect.top;
+        const isTop = y < rect.height / 2;
+        const position = isTop ? 'top' : 'bottom';
+
+        if (dragOverPosition !== position) {
+            setDragOverPosition(position);
+        }
+
+        if (task.recordName !== editingTaskId && dragOverTaskId !== task.recordName) {
             setDragOverTaskId(task.recordName);
         }
     };
 
     const handleTaskDragLeave = () => {
         setDragOverTaskId(null);
+        setDragOverPosition(null);
     };
 
     const handleTaskDrop = async (e: React.DragEvent, targetTask: TaskRecord) => {
         e.preventDefault();
         e.stopPropagation();
         setDragOverTaskId(null);
+        setDragOverPosition(null);
 
         const draggedTaskId = e.dataTransfer.getData('text/plain');
         if (!draggedTaskId || draggedTaskId === targetTask.recordName || !container) return;
@@ -1629,8 +1657,24 @@ function ProjectsList() {
         const oldIndex = tasks.findIndex(t => t.recordName === draggedTaskId);
         if (oldIndex === -1) return; // Task not in current list (maybe separate window?)
 
-        const newIndex = tasks.findIndex(t => t.recordName === targetTask.recordName);
+        let newIndex = tasks.findIndex(t => t.recordName === targetTask.recordName);
         if (newIndex === -1) return;
+
+        // If dropped on bottom half, insert AFTER target
+        if (dragOverPosition === 'bottom') {
+            newIndex += 1;
+        }
+
+        // If moving down, we need to adjust index because removal shifts indices
+        // But splice logic handles this if we do remove first then insert?
+        // Let's use standard array move logic
+        if (oldIndex < newIndex) {
+            // Moving down. e.g. 0 -> 2 (insert at 2). 
+            // If we remove 0, 1 becomes 0, 2 becomes 1. 
+            // So if we wanted to insert after 2, 2 is now at 1.
+            // Actually, if we use splice, we remove then insert.
+            newIndex -= 1;
+        }
 
         // Enforce Section Constraints (Project View)
         if (viewMode === 'project' && selectedProject) {
@@ -2117,12 +2161,13 @@ function ProjectsList() {
                         viewMode={viewMode}
                         editingTaskId={editingTaskId}
                         dragOverTaskId={dragOverTaskId}
+                        dragOverPosition={dragOverPosition}
                         projects={projects}
                         editTaskName={editTaskName}
                         setEditTaskName={setEditTaskName}
                         onDragStart={handleDragStart}
-                        onDragOver={handleTaskDragOver}
-                        onDragEnter={handleTaskDragEnter}
+                        onDragOver={(e) => handleTaskDragOver(e, task)}
+                        onDragEnter={() => { }}
                         onDragLeave={handleTaskDragLeave}
                         onDrop={handleTaskDrop}
                         onToggleComplete={handleToggleComplete}
@@ -2328,6 +2373,7 @@ function ProjectsList() {
                 onEditClick={handleEditClick}
                 onDragStart={handleDragStart}
                 onDragEnd={handleDragEnd}
+                onDragOver={handleDragOver}
                 onDrop={handleDrop}
                 onDropDue={handleDropDue}
                 onDropNextActions={handleDropNextActions}

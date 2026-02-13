@@ -45,6 +45,7 @@ type SidebarProps = {
     onEditClick: (project: ProjectRecord) => void;
     onDragStart: (e: React.DragEvent, item: any, type: 'project') => void;
     onDragEnd: () => void;
+    onDragOver: (e: React.DragEvent, project: ProjectRecord) => void;
     onDrop: (e: React.DragEvent, project: any) => void;
     onDropDue: (e: React.DragEvent) => void;
     onDropNextActions: (e: React.DragEvent) => void;
@@ -88,6 +89,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     onEditClick,
     onDragStart,
     onDragEnd,
+    onDragOver,
     onDrop,
     onDropDue,
     onDropNextActions,
@@ -488,13 +490,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                             setSelectedProject(project);
                                             setViewMode('project');
                                         }}
-                                        onDragOver={(e) => {
-                                            e.preventDefault();
-                                            e.dataTransfer.dropEffect = 'move';
-                                            if (dragOverProjectId !== project.recordName) {
-                                                setDragOverProjectId(project.recordName);
-                                            }
-                                        }}
+                                        onDragOver={(e) => onDragOver(e, project)}
                                         onDragEnter={(e) => {
                                             e.preventDefault();
                                             if (dragOverProjectId !== project.recordName) {
@@ -507,15 +503,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                             }
                                         }}
                                         onDrop={(e) => onDrop(e, project)}
-                                        className={`group flex items-center justify-between p-2 rounded-lg cursor-pointer transition-colors ${viewMode === 'project' && selectedProject?.recordName === project.recordName
+                                        className={`group relative flex items-center justify-between p-2 rounded-lg cursor-pointer transition-colors ${viewMode === 'project' && selectedProject?.recordName === project.recordName
                                             ? 'bg-blue-50 text-blue-700'
-                                            : dragOverProjectId === project.recordName
-                                                ? isDraggingProject
-                                                    ? dragOverPosition === 'top' ? 'border-t-2 border-blue-500' : 'border-b-2 border-blue-500'
-                                                    : 'bg-blue-100 ring-2 ring-blue-300 ring-inset'
+                                            : dragOverProjectId === project.recordName && !isDraggingProject
+                                                ? 'bg-blue-100 ring-2 ring-blue-300 ring-inset'
                                                 : 'hover:bg-gray-100 text-gray-700'
                                             }`}
                                     >
+                                        {dragOverProjectId === project.recordName && isDraggingProject && dragOverPosition === 'top' && (
+                                            <div className="absolute -top-[2px] left-0 right-0 h-1 bg-blue-500 rounded-full z-10 pointer-events-none" />
+                                        )}
+                                        {dragOverProjectId === project.recordName && isDraggingProject && dragOverPosition === 'bottom' && (
+                                            <div className="absolute bottom-0 left-0 right-0 h-1 bg-blue-500 rounded-full z-10 pointer-events-none" />
+                                        )}
                                         <div className="flex-1 min-w-0 font-medium truncate">
                                             {editingId === project.recordName ? (
                                                 <div className="flex items-center gap-1">

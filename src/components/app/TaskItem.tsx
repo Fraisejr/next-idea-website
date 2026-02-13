@@ -19,13 +19,14 @@ type TaskItemProps = {
     viewMode: string;
     editingTaskId: string | null;
     dragOverTaskId: string | null;
+    dragOverPosition: 'top' | 'bottom' | null;
     projects: ProjectRecord[];
     editTaskName: string;
     setEditTaskName: (name: string) => void;
 
     // Handlers
     onDragStart: (e: React.DragEvent, task: TaskRecord, type: 'task') => void;
-    onDragOver: (e: React.DragEvent) => void;
+    onDragOver: (e: React.DragEvent, task: TaskRecord) => void;
     onDragEnter: (task: TaskRecord) => void;
     onDragLeave: () => void;
     onDrop: (e: React.DragEvent, task: TaskRecord) => void;
@@ -42,6 +43,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     viewMode,
     editingTaskId,
     dragOverTaskId,
+    dragOverPosition,
     projects,
     editTaskName,
     setEditTaskName,
@@ -86,16 +88,23 @@ export const TaskItem: React.FC<TaskItemProps> = ({
         <div
             draggable={canDrag}
             onDragStart={(e) => onDragStart(e, task, 'task')}
-            onDragOver={onDragOver}
+            onDragOver={(e) => onDragOver(e, task)}
             onDragEnter={() => onDragEnter(task)}
-            onDragLeave={onDragLeave}
+            onDragLeave={(e) => {
+                // Prevent clearing if moving into a child element
+                if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+                onDragLeave();
+            }}
             onDrop={(e) => onDrop(e, task)}
-            className={`group p-3 bg-white border border-gray-100 rounded-xl hover:shadow-sm transition-all flex items-center gap-3 ${canDrag ? 'cursor-grab active:cursor-grabbing hover:border-blue-100' : 'opacity-75'
-                } ${dragOverTaskId === task.recordName
-                    ? 'border-blue-400 border-t-4 border-t-blue-500'
-                    : ''
+            className={`relative group p-3 bg-white border border-gray-100 rounded-xl hover:shadow-sm transition-all flex items-center gap-3 ${canDrag ? 'cursor-grab active:cursor-grabbing' : 'opacity-75'
                 }`}
         >
+            {dragOverTaskId === task.recordName && (!dragOverPosition || dragOverPosition === 'top') && (
+                <div className="absolute -top-[2px] left-0 right-0 h-1 bg-blue-500 rounded-full z-10 pointer-events-none" />
+            )}
+            {dragOverTaskId === task.recordName && dragOverPosition === 'bottom' && (
+                <div className="absolute bottom-0 left-0 right-0 h-1 bg-blue-500 rounded-full z-10 pointer-events-none" />
+            )}
             <div
                 className={`w-5 h-5 rounded-full border-2 cursor-pointer flex items-center justify-center transition-colors ${task.fields.CD_completed?.value === 1
                     ? 'bg-green-500 border-green-500'
