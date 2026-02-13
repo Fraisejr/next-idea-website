@@ -65,9 +65,97 @@ function ProjectsList() {
         }
     }, [selectedTaskDetails?.recordName]);
 
+    // Sync link input when selected task changes
     // ============ TASK CACHE SYSTEM ============
     // Global cache for all active (non-completed) tasks
     const [allTasksCache, setAllTasksCache] = useState<Record<string, TaskRecord>>({});
+
+    // Calculate Counts for Sidebar
+    const sidebarCounts = useMemo(() => {
+        const counts = {
+            inbox: 0,
+            due: 0,
+            nextActions: 0,
+            waiting: 0,
+            deferred: 0,
+            someday: 0,
+            history: 0,
+            projects: {} as Record<string, number>
+        };
+
+        // Initialize project counts
+        projects.forEach(p => {
+            counts.projects[p.recordName] = 0;
+        });
+
+        const now = Date.now();
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        tomorrow.setHours(0, 0, 0, 0);
+        const tomorrowTs = tomorrow.getTime();
+
+        Object.values(allTasksCache).forEach(task => {
+            // Skip completed tasks for active counts, but count for history (if we want history count)
+            // History count usually implies "Completed Today" or similar, but here let's just count total completed?
+            // Actually users usually want to see "Completed Today" or just a link. 
+            // The sidebar item says "Completed Tasks", often users like a count of total completed or recent.
+            // For now, let's count ALL completed tasks in cache (which are fetched if they were active recently or specifically fetched)
+            // But wait, our cache only has ACTIVE tasks (filtered by CD_completed !== 1). 
+            // So history count will be 0 unless we change cache logic or specific fetch.
+            // Let's leave history count as 0 for now as cache doesn't have them.
+
+            if (task.fields.CD_completed?.value === 1) {
+                // counts.history++; // Cache doesn't have completed tasks usually
+                return;
+            }
+
+            // Project Counts
+            if (task.fields.CD_project?.value) {
+                const pid = task.fields.CD_project.value;
+                if (counts.projects[pid] !== undefined) {
+                    counts.projects[pid]++;
+                }
+            }
+
+            // Inbox: No Project, not waiting, not someday
+            if (!task.fields.CD_project?.value && task.fields.CD_waitingfor?.value !== 1 && task.fields.CD_someday?.value !== 1) {
+                counts.inbox++;
+            }
+
+            // Due/Overdue: Date Active
+            if (task.fields.CD_dateactive?.value === 1 && task.fields.CD_date?.value) {
+                // Priority 1: Deferred (Hidden until future date)
+                if (task.fields.CD_hideuntildate?.value === 1 && task.fields.CD_date.value > now) {
+                    counts.deferred++;
+                }
+                // Priority 2: Due/Overdue (has active date) - if not deferred (or deferred date passed)
+                else {
+                    if (task.fields.CD_date.value < tomorrowTs) {
+                        counts.due++;
+                    }
+                    // User Request: Include Due/Overdue in Next Actions count
+                    counts.nextActions++;
+                }
+            } else {
+                // No active date
+
+                // Waiting For
+                if (task.fields.CD_waitingfor?.value === 1) {
+                    counts.waiting++;
+                }
+                // Someday/Maybe
+                else if (task.fields.CD_someday?.value === 1) {
+                    counts.someday++;
+                }
+                // Next Actions: Has project (or assigned to Single Actions implicitly), not waiting, not someday, not deferred/due
+                else if (task.fields.CD_project?.value) {
+                    counts.nextActions++;
+                }
+            }
+        });
+
+        return counts;
+    }, [allTasksCache, projects]);
     const [cacheInitialized, setCacheInitialized] = useState(false);
     const [lastCacheRefresh, setLastCacheRefresh] = useState<number>(0);
     const CACHE_REFRESH_INTERVAL = 15000; // 15 seconds
@@ -2158,6 +2246,7 @@ function ProjectsList() {
                 onDropDeferred={handleDropDeferred}
                 onDropSomeday={handleDropSomeday}
                 onShowShortcuts={setShowShortcuts}
+                counts={sidebarCounts}
             />
 
             {/* Main Content: Tasks */}

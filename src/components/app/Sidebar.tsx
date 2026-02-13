@@ -12,7 +12,11 @@ import {
     X,
     Pencil,
     Clock,
-    Keyboard
+    Keyboard,
+    List,
+    SquarePlay,
+    Users,
+    Calendar
 } from 'lucide-react';
 import React from 'react';
 
@@ -45,6 +49,16 @@ type SidebarProps = {
     onDropDeferred: (e: React.DragEvent) => void;
     onDropSomeday: (e: React.DragEvent) => void;
     onShowShortcuts: (show: boolean) => void;
+    counts?: {
+        inbox: number;
+        due: number;
+        nextActions: number;
+        waiting: number;
+        deferred: number;
+        someday: number;
+        history: number;
+        projects: Record<string, number>;
+    };
 };
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -73,7 +87,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     onDropWaiting,
     onDropDeferred,
     onDropSomeday,
-    onShowShortcuts
+    onShowShortcuts,
+    counts
 }) => {
     return (
         <div className="w-64 bg-gray-50 border-r border-gray-100 flex flex-col fixed md:relative h-full z-10 transition-transform md:translate-x-0 -translate-x-full">
@@ -119,7 +134,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             }`}
                     >
                         <Inbox className="w-5 h-5 text-blue-500" />
-                        <span className="font-medium">Inbox</span>
+                        <span className="font-medium flex-1">Inbox</span>
+                        {counts?.inbox ? (
+                            <span className="bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full text-xs font-medium">
+                                {counts.inbox}
+                            </span>
+                        ) : null}
                     </div>
 
                     <div
@@ -144,14 +164,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         }}
                         onDrop={onDropDue}
                         className={`group flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${viewMode === 'due'
-                            ? 'bg-orange-50 text-orange-700'
+                            ? 'bg-green-50 text-green-700'
                             : dragOverProjectId === 'due-pseudo-project'
-                                ? 'bg-orange-100 ring-2 ring-orange-300 ring-inset'
+                                ? 'bg-green-100 ring-2 ring-green-300 ring-inset'
                                 : 'hover:bg-gray-100 text-gray-700'
                             }`}
                     >
-                        <CalendarClock className={`w-5 h-5 ${viewMode === 'due' ? 'text-orange-500' : 'text-gray-400'}`} />
-                        <span className="font-medium">Due and Overdue</span>
+                        <Calendar className={`w-5 h-5 ${viewMode === 'due' ? 'text-green-500' : 'text-gray-400'}`} />
+                        <span className="font-medium flex-1">Due</span>
+                        {counts?.due ? (
+                            <span className="bg-green-100 text-green-600 px-2 py-0.5 rounded-full text-xs font-medium">
+                                {counts.due}
+                            </span>
+                        ) : null}
                     </div>
 
                     <div
@@ -177,14 +202,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         }}
                         onDrop={onDropNextActions}
                         className={`group flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${viewMode === 'next_actions'
-                            ? 'bg-purple-50 text-purple-700'
+                            ? 'bg-blue-50 text-blue-700'
                             : dragOverProjectId === 'next-actions-pseudo-project'
-                                ? 'bg-purple-100 ring-2 ring-purple-300 ring-inset'
+                                ? 'bg-blue-100 ring-2 ring-blue-300 ring-inset'
                                 : 'hover:bg-gray-100 text-gray-700'
                             }`}
                     >
-                        <Zap className={`w-5 h-5 ${viewMode === 'next_actions' ? 'text-purple-500' : 'text-gray-400'}`} />
-                        <span className="font-medium">Next actions</span>
+                        <SquarePlay className={`w-5 h-5 ${viewMode === 'next_actions' ? 'text-blue-500' : 'text-gray-400'}`} />
+                        <span className="font-medium flex-1">Next</span>
+                        {counts?.nextActions ? (
+                            <span className="bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full text-xs font-medium">
+                                {counts.nextActions}
+                            </span>
+                        ) : null}
                     </div>
 
                     <div
@@ -209,14 +239,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         }}
                         onDrop={onDropWaiting}
                         className={`group flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${viewMode === 'waiting'
-                            ? 'bg-indigo-50 text-indigo-700'
+                            ? 'bg-orange-50 text-orange-700'
                             : dragOverProjectId === 'waiting-pseudo-project'
-                                ? 'bg-indigo-100 ring-2 ring-indigo-300 ring-inset'
+                                ? 'bg-orange-100 ring-2 ring-orange-300 ring-inset'
                                 : 'hover:bg-gray-100 text-gray-700'
                             }`}
                     >
-                        <Hourglass className={`w-5 h-5 ${viewMode === 'waiting' ? 'text-indigo-500' : 'text-gray-400'}`} />
-                        <span className="font-medium">Waiting for</span>
+                        <Users className={`w-5 h-5 ${viewMode === 'waiting' ? 'text-orange-500' : 'text-gray-400'}`} />
+                        <span className="font-medium flex-1">Waiting for</span>
+                        {counts?.waiting ? (
+                            <span className="bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full text-xs font-medium">
+                                {counts.waiting}
+                            </span>
+                        ) : null}
                     </div>
 
                     <div
@@ -241,14 +276,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         }}
                         onDrop={onDropDeferred}
                         className={`group flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${viewMode === 'deferred'
-                            ? 'bg-teal-50 text-teal-700'
+                            ? 'bg-gray-100 text-gray-900'
                             : dragOverProjectId === 'deferred-pseudo-project'
-                                ? 'bg-teal-100 ring-2 ring-teal-300 ring-inset'
+                                ? 'bg-gray-200 ring-2 ring-gray-300 ring-inset'
                                 : 'hover:bg-gray-100 text-gray-700'
                             }`}
                     >
-                        <CalendarDays className={`w-5 h-5 ${viewMode === 'deferred' ? 'text-teal-500' : 'text-gray-400'}`} />
-                        <span className="font-medium">Deferred</span>
+                        <CalendarClock className={`w-5 h-5 ${viewMode === 'deferred' ? 'text-gray-600' : 'text-gray-400'}`} />
+                        <span className="font-medium flex-1">Deferred</span>
+                        {counts?.deferred ? (
+                            <span className="bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full text-xs font-medium">
+                                {counts.deferred}
+                            </span>
+                        ) : null}
                     </div>
 
                     <div
@@ -273,14 +313,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         }}
                         onDrop={onDropSomeday}
                         className={`group flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${viewMode === 'someday'
-                            ? 'bg-amber-50 text-amber-700'
+                            ? 'bg-[#fdf4eb] text-[#92400e]'
                             : dragOverProjectId === 'someday-pseudo-project'
-                                ? 'bg-amber-100 ring-2 ring-amber-300 ring-inset'
+                                ? 'bg-[#fdf4eb] ring-2 ring-[#92400e] ring-inset'
                                 : 'hover:bg-gray-100 text-gray-700'
                             }`}
                     >
-                        <CalendarClock className={`w-5 h-5 ${viewMode === 'someday' ? 'text-amber-500' : 'text-gray-400'}`} />
-                        <span className="font-medium">Someday / Maybe</span>
+                        <List className={`w-5 h-5 ${viewMode === 'someday' ? 'text-[#92400e]' : 'text-gray-400'}`} />
+                        <span className="font-medium flex-1">Someday</span>
+                        {counts?.someday ? (
+                            <span className="bg-[#fdf4eb] text-[#92400e] px-2 py-0.5 rounded-full text-xs font-medium">
+                                {counts.someday}
+                            </span>
+                        ) : null}
                     </div>
                 </div>
 
@@ -367,15 +412,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                             ) : (
                                                 <div className="flex items-center justify-between w-full">
                                                     <span className="truncate">{project.fields.CD_name?.value || 'Untitled'}</span>
-                                                    <button
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            onEditClick(project);
-                                                        }}
-                                                        className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-blue-600 rounded"
-                                                    >
-                                                        <Pencil className="w-3 h-3" />
-                                                    </button>
+                                                    <div className="flex items-center gap-2">
+                                                        {counts?.projects?.[project.recordName] ? (
+                                                            <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full text-xs font-medium group-hover:bg-white group-hover:text-blue-600 transition-colors">
+                                                                {counts.projects[project.recordName]}
+                                                            </span>
+                                                        ) : null}
+                                                        <button
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                onEditClick(project);
+                                                            }}
+                                                            className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-blue-600 rounded"
+                                                        >
+                                                            <Pencil className="w-3 h-3" />
+                                                        </button>
+                                                    </div>
                                                 </div>
                                             )}
                                         </div>
@@ -451,15 +503,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                                     ) : (
                                                         <div className="flex items-center justify-between w-full">
                                                             <span className="truncate">{project.fields.CD_name?.value || 'Untitled'}</span>
-                                                            <button
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    onEditClick(project);
-                                                                }}
-                                                                className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-blue-600 rounded"
-                                                            >
-                                                                <Pencil className="w-3 h-3" />
-                                                            </button>
+                                                            <div className="flex items-center gap-2">
+                                                                {counts?.projects?.[project.recordName] ? (
+                                                                    <span className="bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full text-xs font-medium">
+                                                                        {counts.projects[project.recordName]}
+                                                                    </span>
+                                                                ) : null}
+                                                                <button
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        onEditClick(project);
+                                                                    }}
+                                                                    className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-blue-600 rounded"
+                                                                >
+                                                                    <Pencil className="w-3 h-3" />
+                                                                </button>
+                                                            </div>
                                                         </div>
                                                     )}
                                                 </div>
@@ -484,7 +543,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             }`}
                     >
                         <Clock className="w-5 h-5 text-gray-400 group-hover:text-blue-600" />
-                        <span className="font-medium">Completed Tasks</span>
+                        <span className="font-medium flex-1">Completed Tasks</span>
+                        {counts?.history ? (
+                            <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full text-xs font-medium group-hover:bg-blue-100 group-hover:text-blue-600">
+                                {counts.history}
+                            </span>
+                        ) : null}
                     </div>
                 </div>
 

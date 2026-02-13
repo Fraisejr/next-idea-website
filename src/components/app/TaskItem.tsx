@@ -140,9 +140,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                                     </span>
                                 );
                             })() : null}
-                            {(!task.fields.CD_someday?.value && !task.fields.CD_waitingfor?.value) ? <span title="Next Action" className="text-yellow-500"><Zap className="w-3 h-3" /></span> : null}
-                            {task.fields.CD_waitingfor?.value === 1 && <span title="Waiting For" className="text-orange-400"><Hourglass className="w-3 h-3" /></span>}
-                            {task.fields.CD_someday?.value === 1 && <span title="Someday" className="text-purple-400"><Moon className="w-3 h-3" /></span>}
+
                             {task.fields.CD_recurring?.value === 1 && <span title="Recurring" className="text-blue-400"><Repeat className="w-3 h-3" /></span>}
                         </div>
 
