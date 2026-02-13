@@ -126,50 +126,53 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                         <button onClick={() => onCancel()} className="text-red-600 p-1 hover:bg-red-50 rounded"><X className="w-4 h-4" /></button>
                     </div>
                 ) : (
-                    <div className="flex items-center w-full relative cursor-pointer">
-                        <span className={`text-gray-900 ${task.fields.CD_completed?.value === 1 ? 'line-through text-gray-400' : ''}`}>
-                            {task.fields.CD_name?.value}
-                        </span>
-                        {/* Meta Icons */}
-                        <div className="flex items-center gap-1 ml-2">
-                            {task.fields.CD_date?.value && task.fields.CD_dateactive?.value === 1 ? (() => {
-                                const { text, className } = formatDate(task.fields.CD_date.value);
-                                return (
-                                    <span className={`text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1 ${className}`}>
-                                        <Calendar className="w-3 h-3" /> {text}
-                                    </span>
-                                );
-                            })() : null}
+                    <div className="flex flex-col w-full relative cursor-pointer">
+                        <div className="flex items-center w-full">
+                            <span className={`text-gray-900 ${task.fields.CD_completed?.value === 1 ? 'line-through text-gray-400' : ''}`}>
+                                {task.fields.CD_name?.value}
+                            </span>
+                            {/* Meta Icons */}
+                            <div className="flex items-center gap-1 ml-2">
+                                {task.fields.CD_date?.value && task.fields.CD_dateactive?.value === 1 ? (() => {
+                                    const { text, className } = formatDate(task.fields.CD_date.value);
+                                    return (
+                                        <span className={`text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1 ${className}`}>
+                                            <Calendar className="w-3 h-3" /> {text}
+                                        </span>
+                                    );
+                                })() : null}
 
-                            {task.fields.CD_recurring?.value === 1 && <span title="Recurring" className="text-blue-400"><Repeat className="w-3 h-3" /></span>}
-                        </div>
-
-                        {/* Actions: Right next to name/meta, larger icons */}
-                        {showActions && (
-                            <div className="flex items-center gap-1 ml-2 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
-                                <button
-                                    onClick={(e) => { e.stopPropagation(); onInsertTask(task); }}
-                                    className="p-1.5 text-green-600 bg-green-50 hover:bg-green-100 rounded-lg cursor-pointer"
-                                    title="Insert Task Below"
-                                >
-                                    <Plus className="w-4 h-4" />
-                                </button>
-
-                                <button
-                                    onClick={(e) => { e.stopPropagation(); onTaskClick(task); }}
-                                    className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg ml-0.5 cursor-pointer"
-                                    title="Task Details"
-                                >
-                                    <Info className="w-4 h-4" />
-                                </button>
+                                {task.fields.CD_recurring?.value === 1 && <span title="Recurring" className="text-blue-400"><Repeat className="w-3 h-3" /></span>}
                             </div>
-                        )}
-                        {/* Show different actions or Project Name in History Mode? */}
-                        {viewMode === 'history' && (
-                            <span className="text-xs text-gray-400 ml-auto">
+
+                            {/* Actions: Right next to name/meta, larger icons */}
+                            {showActions && (
+                                <div className="flex items-center gap-1 ml-2 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+                                    <button
+                                        onClick={(e) => { e.stopPropagation(); onInsertTask(task); }}
+                                        className="p-1.5 text-green-600 bg-green-50 hover:bg-green-100 rounded-lg cursor-pointer"
+                                        title="Insert Task Below"
+                                    >
+                                        <Plus className="w-4 h-4" />
+                                    </button>
+
+                                    <button
+                                        onClick={(e) => { e.stopPropagation(); onTaskClick(task); }}
+                                        className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg ml-0.5 cursor-pointer"
+                                        title="Task Details"
+                                    >
+                                        <Info className="w-4 h-4" />
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                        {/* Project Name (Only if not in project view) */}
+                        {viewMode !== 'project' && task.fields.CD_project?.value && (
+                            <span className="text-xs text-gray-400 mt-0.5">
                                 {projects.find(p => p.recordName === task.fields.CD_project?.value)?.fields.CD_name?.value}
                             </span>
                         )}
+                        {/* Show Project Name in History Mode (redundant check but keeping logic similar to before if needed, actually removed separate history check as generic check covers it) */}
                     </div>
                 )}
             </div>

@@ -18,8 +18,15 @@ const getTaskSection = (task: TaskRecord): 'due' | 'nextActions' | 'waitingFor' 
         return 'deferred';
     }
 
-    // Priority 2: Due/Overdue (has active date)
-    if (task.fields.CD_dateactive?.value === 1 && task.fields.CD_date?.value) return 'due';
+    // Priority 2: Due/Overdue (has active date AND is due today or past)
+    if (task.fields.CD_dateactive?.value === 1 && task.fields.CD_date?.value) {
+        const todayEnd = new Date();
+        todayEnd.setHours(23, 59, 59, 999);
+        if (task.fields.CD_date.value <= todayEnd.getTime()) {
+            return 'due';
+        }
+        // If future date, fall through to Next Actions (or Waiting/Someday if checked)
+    }
 
     // Priority 3: Waiting For
     if (task.fields.CD_waitingfor?.value === 1) return 'waitingFor';
@@ -134,7 +141,16 @@ function ProjectsList() {
                         counts.due++;
                     }
                     // User Request: Include Due/Overdue in Next Actions count
-                    counts.nextActions++;
+                    if (task.fields.CD_waitingfor?.value === 1) {
+                        counts.waiting++;
+                    }
+                    else if (task.fields.CD_someday?.value === 1) {
+                        counts.someday++;
+                    }
+                    else {
+                        // Only count as next action if not waiting/someday
+                        counts.nextActions++;
+                    }
                 }
             } else {
                 // No active date
@@ -275,7 +291,9 @@ function ProjectsList() {
                 CD_name: { value: '' },
                 CD_id: { value: 'new-project' },
                 CD_order: { value: maxOrder + 1 },
-                CD_singleactions: { value: 0 }
+                CD_singleactions: { value: 0 },
+                CD_icon: { value: 'list.clipboard' },
+                CD_color: { value: 'blue' }
             }
         };
 
@@ -295,7 +313,9 @@ function ProjectsList() {
                 CD_name: { value: '' },
                 CD_id: { value: 'new-project' },
                 CD_order: { value: 0 },
-                CD_singleactions: { value: 0 }
+                CD_singleactions: { value: 0 },
+                CD_icon: { value: 'list.clipboard' },
+                CD_color: { value: 'blue' }
             }
         };
 
@@ -350,7 +370,9 @@ function ProjectsList() {
                         CD_id: { value: crypto.randomUUID() },
                         CD_order: { value: project?.fields.CD_order?.value || 0 },
                         CD_singleactions: { value: 0 },
-                        CD_focus: { value: 1 }
+                        CD_focus: { value: 1 },
+                        CD_icon: { value: 'list.clipboard' },
+                        CD_color: { value: 'blue' }
                     }
                 };
 
@@ -759,7 +781,7 @@ function ProjectsList() {
                 const query = {
                     recordType: 'CD_Project',
                     filterBy: [{ fieldName: 'CD_name', comparator: 'NOT_EQUALS', fieldValue: { value: '' } }],
-                    desiredKeys: ['CD_name', 'CD_id', 'CD_order', 'CD_completed', 'CD_singleactions', 'CD_focus'],
+                    desiredKeys: ['CD_name', 'CD_id', 'CD_order', 'CD_completed', 'CD_singleactions', 'CD_focus', 'CD_icon', 'CD_color'],
                     resultsLimit: 100
                 };
                 const options = { zoneID: { zoneName: 'com.apple.coredata.cloudkit.zone' } };
@@ -1702,7 +1724,18 @@ function ProjectsList() {
             // Waiting For: has waitingfor flag
             filtered = filtered.filter(t => {
                 if (t.fields.CD_completed?.value === 1) return false;
-                return t.fields.CD_waitingfor?.value === 1;
+                if (t.fields.CD_waitingfor?.value !== 1) return false;
+
+                // Exclude if hidden until future (User Request: shouldn't show in Waiting)
+                if (t.fields.CD_dateactive?.value === 1 &&
+                    t.fields.CD_hideuntildate?.value === 1 &&
+                    t.fields.CD_date?.value) {
+                    const now = Date.now();
+                    // Note: Use exact comparison to now, similar to deferred logic
+                    if (t.fields.CD_date.value > now) return false;
+                }
+
+                return true;
             });
         } else if (viewMode === 'someday') {
             // Someday: has someday flag
@@ -1714,8 +1747,8 @@ function ProjectsList() {
             // Due: has date, date is today or earlier, not deferred
             filtered = filtered.filter(t => {
                 if (t.fields.CD_completed?.value === 1) return false;
-                if (t.fields.CD_someday?.value === 1) return false;
-                if (t.fields.CD_waitingfor?.value === 1) return false;
+                // REMOVED: if (t.fields.CD_someday?.value === 1) return false;
+                // REMOVED: if (t.fields.CD_waitingfor?.value === 1) return false;
                 if (!t.fields.CD_dateactive?.value || t.fields.CD_dateactive.value !== 1) return false;
                 if (!t.fields.CD_date?.value) return false;
 
@@ -1737,8 +1770,8 @@ function ProjectsList() {
             // Deferred: has project, hidden until future date
             filtered = filtered.filter(t => {
                 if (t.fields.CD_completed?.value === 1) return false;
-                if (t.fields.CD_someday?.value === 1) return false;
-                if (t.fields.CD_waitingfor?.value === 1) return false;
+                // REMOVED: if (t.fields.CD_someday?.value === 1) return false;
+                // REMOVED: if (t.fields.CD_waitingfor?.value === 1) return false;
                 if (!t.fields.CD_project?.value) return false;
 
                 // Must be hidden until future date
@@ -2322,25 +2355,35 @@ function ProjectsList() {
                         <div className="space-y-6">
                             {viewMode === 'project' && sections ? (
                                 <>
-                                    <TaskSection title="Due / Overdue" count={sections.due.length}>
-                                        {renderTaskList(sections.due)}
-                                    </TaskSection>
+                                    {sections.due.length > 0 && (
+                                        <TaskSection title="Due / Overdue" count={sections.due.length} colorClass="text-green-700">
+                                            {renderTaskList(sections.due)}
+                                        </TaskSection>
+                                    )}
 
-                                    <TaskSection title="Next Actions" count={sections.nextActions.length}>
-                                        {renderTaskList(sections.nextActions)}
-                                    </TaskSection>
+                                    {sections.nextActions.length > 0 && (
+                                        <TaskSection title="Next Actions" count={sections.nextActions.length} colorClass="text-blue-700">
+                                            {renderTaskList(sections.nextActions)}
+                                        </TaskSection>
+                                    )}
 
-                                    <TaskSection title="Deferred" count={sections.deferred.length}>
-                                        {renderTaskList(sections.deferred)}
-                                    </TaskSection>
+                                    {sections.waitingFor.length > 0 && (
+                                        <TaskSection title="Waiting For" count={sections.waitingFor.length} colorClass="text-orange-500">
+                                            {renderTaskList(sections.waitingFor)}
+                                        </TaskSection>
+                                    )}
 
-                                    <TaskSection title="Waiting For" count={sections.waitingFor.length}>
-                                        {renderTaskList(sections.waitingFor)}
-                                    </TaskSection>
+                                    {sections.deferred.length > 0 && (
+                                        <TaskSection title="Deferred" count={sections.deferred.length} colorClass="text-gray-600">
+                                            {renderTaskList(sections.deferred)}
+                                        </TaskSection>
+                                    )}
 
-                                    <TaskSection title="Someday / Maybe" count={sections.someday.length}>
-                                        {renderTaskList(sections.someday)}
-                                    </TaskSection>
+                                    {sections.someday.length > 0 && (
+                                        <TaskSection title="Someday / Maybe" count={sections.someday.length} colorClass="text-[#92400e]">
+                                            {renderTaskList(sections.someday)}
+                                        </TaskSection>
+                                    )}
                                 </>
                             ) : (
                                 <div className="space-y-2">

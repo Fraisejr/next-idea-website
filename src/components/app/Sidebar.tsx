@@ -1,4 +1,5 @@
 import { ProjectRecord } from '@/lib/cloudkit';
+import { SFSymbolMapper } from '@/components/SFSymbolMapper';
 import {
     Inbox,
     CalendarClock,
@@ -91,7 +92,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     counts
 }) => {
     return (
-        <div className="w-64 bg-gray-50 border-r border-gray-100 flex flex-col fixed md:relative h-full z-10 transition-transform md:translate-x-0 -translate-x-full">
+        <div className="w-80 bg-gray-50 border-r border-gray-100 flex flex-col fixed md:relative h-full z-10 transition-transform md:translate-x-0 -translate-x-full">
             <div className="p-4 border-b border-gray-100 bg-white">
                 <h1 className="font-bold text-xl bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
                     Next Idea
@@ -410,8 +411,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                                     <button onClick={(e) => { e.stopPropagation(); onCancel(); }} className="text-red-600"><X className="w-4 h-4" /></button>
                                                 </div>
                                             ) : (
-                                                <div className="flex items-center justify-between w-full">
-                                                    <span className="truncate">{project.fields.CD_name?.value || 'Untitled'}</span>
+                                                <div className="flex items-center w-full gap-2">
+                                                    <SFSymbolMapper
+                                                        symbol={project.fields.CD_icon?.value}
+                                                        color={project.fields.CD_color?.value}
+                                                        className="w-4 h-4 text-gray-400"
+                                                        style={project.fields.CD_color?.value ? { color: project.fields.CD_color.value } : {}}
+                                                    />
+                                                    <span className="truncate flex-1">{project.fields.CD_name?.value || 'Untitled'}</span>
                                                     <div className="flex items-center gap-2">
                                                         {counts?.projects?.[project.recordName] ? (
                                                             <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full text-xs font-medium group-hover:bg-white group-hover:text-blue-600 transition-colors">
