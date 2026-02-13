@@ -2675,7 +2675,7 @@ function ProjectsList() {
                                                 href={selectedTaskDetails.fields.CD_link.value.startsWith('http') ? selectedTaskDetails.fields.CD_link.value : `https://${selectedTaskDetails.fields.CD_link.value}`}
                                                 target="_blank"
                                                 rel="noopener noreferrer"
-                                                className="p-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-colors flex items-center justify-center"
+                                                className="p-2 bg-purple-50 text-purple-600 rounded-lg hover:bg-purple-100 transition-colors flex items-center justify-center"
                                                 title="Open Link"
                                             >
                                                 <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

@@ -9,7 +9,8 @@ import {
     Moon,
     Repeat,
     Plus,
-    Info // Imported Info
+    Info,
+    ExternalLink
 } from 'lucide-react';
 import React from 'react';
 
@@ -163,6 +164,19 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                                     >
                                         <Info className="w-4 h-4" />
                                     </button>
+
+                                    {task.fields.CD_link?.value && (
+                                        <a
+                                            href={task.fields.CD_link.value.startsWith('http') ? task.fields.CD_link.value : `https://${task.fields.CD_link.value}`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            onClick={(e) => e.stopPropagation()}
+                                            className="p-1.5 text-purple-600 bg-purple-50 hover:bg-purple-100 rounded-lg ml-0.5 cursor-pointer flex items-center justify-center"
+                                            title="Open Link"
+                                        >
+                                            <ExternalLink className="w-4 h-4" />
+                                        </a>
+                                    )}
                                 </div>
                             )}
                         </div>
