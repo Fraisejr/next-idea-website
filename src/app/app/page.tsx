@@ -546,6 +546,9 @@ function ProjectsList() {
                     } : t
             ));
 
+            // Add to cache to prevent flickering/reversion
+            upsertTaskInCache(savedRecord);
+
             setEditingTaskId(null);
             setEditTaskName('');
 
@@ -2155,7 +2158,14 @@ function ProjectsList() {
             ));
         } catch (err) {
             console.error('Toggle complete failed:', err);
-            // Revert on error?
+            alert('Network error: Failed to update task status. Please check your connection.');
+
+            // Revert optimistic update using original task state
+            setTasks(prev => prev.map(t =>
+                t.recordName === task.recordName
+                    ? { ...t, fields: { ...t.fields, CD_completed: task.fields.CD_completed } }
+                    : t
+            ));
         }
     };
 
