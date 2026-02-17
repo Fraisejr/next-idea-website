@@ -479,6 +479,8 @@ function ProjectsList() {
                         CD_id: { value: crypto.randomUUID() },
                         // Ensure completion is 0
                         CD_completed: { value: 0 },
+                        // CRITICAL FIX: Set modified date so cache protection logic works (prevents disappearing)
+                        CD_modifieddate: { value: Date.now() }
                     }
                 };
 
@@ -523,6 +525,7 @@ function ProjectsList() {
 
             // 2. Update field
             fullRecord.fields.CD_name = { value: editTaskName };
+            fullRecord.fields.CD_modifieddate = { value: Date.now() }; // Update modified date
 
             // 3. Save
             const saveResult = await privateDB.saveRecords([fullRecord], { zoneID });
@@ -534,7 +537,11 @@ function ProjectsList() {
                 t.recordName === savedRecord.recordName ?
                     {
                         ...t,
-                        fields: { ...t.fields, CD_name: { value: editTaskName } },
+                        fields: {
+                            ...t.fields,
+                            CD_name: { value: editTaskName },
+                            CD_modifieddate: { value: Date.now() }
+                        },
                         recordChangeTag: savedRecord.recordChangeTag
                     } : t
             ));
@@ -681,17 +688,56 @@ function ProjectsList() {
         setEditTaskName('');
 
         // Persist shifts in background
+        // Persist shifts in background
         if (shiftedRecordsToSave.length > 0) {
             try {
-                const result = await privateDB.saveRecords(shiftedRecordsToSave, { zoneID });
-                if (result.hasErrors) throw new Error(result.errors[0].message);
+                // CRITICAL FIX: Fetch latest versions of shifted tasks before saving to avoid CAS Op-Lock failures
+                const recordNamesToFetch = shiftedRecordsToSave.map(r => r.recordName);
 
-                // Update local tags for shifted items
-                const savedRecords = result.records;
-                setTasks(currentTasks => currentTasks.map(t => {
-                    const saved = savedRecords.find((r: any) => r.recordName === t.recordName);
-                    return saved ? { ...t, recordChangeTag: saved.recordChangeTag } : t;
-                }));
+                // Fetch in batches if necessary (though usually < 400 is fine)
+                const fetchResult = await privateDB.fetchRecords(recordNamesToFetch, { zoneID });
+
+                if (fetchResult.hasErrors) {
+                    console.error('Failed to fetch records for shifting:', fetchResult.errors);
+                    // If fetch fails, we can't save safely. 
+                    // Since this is a background optimization (order fix), we could abort or retry.
+                    // Let's abort to avoid corrupting data with "force save" attempt.
+                    return;
+                }
+
+                const fetchedRecordsMap = new Map();
+                fetchResult.records.forEach((r: any) => fetchedRecordsMap.set(r.recordName, r));
+
+                const freshRecordsToSave = shiftedRecordsToSave.map(localShift => {
+                    const freshRecord = fetchedRecordsMap.get(localShift.recordName);
+                    if (!freshRecord) return null; // Should not happen if fetch succeeded
+
+                    return {
+                        recordName: freshRecord.recordName,
+                        recordType: 'CD_Task',
+                        recordChangeTag: freshRecord.recordChangeTag, // Use FRESH tag
+                        fields: {
+                            // We only want to update the order. 
+                            // The logic was: t.fields.CD_order = value + 1.
+                            // We trust our calculation of "new order" based on the insertion point relative to others.
+                            // If order changed on server, this might overwrite it. 
+                            // But usually "insert here" implies relative order.
+                            CD_order: localShift.fields.CD_order
+                        }
+                    };
+                }).filter(Boolean);
+
+                if (freshRecordsToSave.length > 0) {
+                    const result = await privateDB.saveRecords(freshRecordsToSave, { zoneID });
+                    if (result.hasErrors) throw new Error(result.errors[0].message);
+
+                    // Update local tags for shifted items
+                    const savedRecords = result.records;
+                    setTasks(currentTasks => currentTasks.map(t => {
+                        const saved = savedRecords.find((r: any) => r.recordName === t.recordName);
+                        return saved ? { ...t, recordChangeTag: saved.recordChangeTag } : t;
+                    }));
+                }
             } catch (err) {
                 console.error('Failed to shift tasks:', err);
             }
@@ -1191,20 +1237,53 @@ function ProjectsList() {
                 const privateDB = container.privateCloudDatabase;
                 const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
 
-                // Re-assign CD_order for all projects (simple normalized ordering)
-                // We'll update ALL projects to ensure consistency, or just the affected range.
-                // Updating all is safer for 'order' fields to keep them clean (0, 1, 2...).
-                const recordsToUpdate = updatedProjects.map(p => ({
-                    recordName: p.recordName,
-                    recordType: 'CD_Project',
-                    recordChangeTag: p.recordChangeTag,
-                    fields: {
-                        CD_order: p.fields.CD_order
+                // CRITICAL FIX: Fetch latest versions of ALL projects involved to prevent CAS Op-Lock failures
+                // We need to fetch all projects that are being updated. 
+                // Since we are updating CD_order for potentially all projects (or a subset), 
+                // let's fetch the ones we are about to save. 
+                // For simplicity/safety, we are updating ALL projects in the list to ensure consistent 0-based indexing.
+                const recordNamesToFetch = updatedProjects.map(p => p.recordName);
+
+                // CloudKit fetchRecords might have a limit (usually 200-400), if we have many projects this might need batching.
+                // Assuming < 100 projects for now.
+                const fetchResult = await privateDB.fetchRecords(recordNamesToFetch, { zoneID });
+
+                if (fetchResult.hasErrors) {
+                    // Only throw if critical? Or try to proceed with what we have? 
+                    // If we can't get fresh tokens, we WILL fail the save. So throw.
+                    throw new Error(fetchResult.errors[0].message);
+                }
+
+                const fetchedRecordsMap = new Map();
+                fetchResult.records.forEach((r: any) => fetchedRecordsMap.set(r.recordName, r));
+
+                const recordsToUpdate = updatedProjects.map(p => {
+                    const freshRecord = fetchedRecordsMap.get(p.recordName);
+                    if (!freshRecord) {
+                        // Should not happen if fetch succeeded, unless project deleted in background
+                        // Fallback to local (will likely fail save but better than crashing)
+                        return {
+                            recordName: p.recordName,
+                            recordType: 'CD_Project',
+                            recordChangeTag: p.recordChangeTag,
+                            fields: {
+                                CD_order: p.fields.CD_order
+                            }
+                        };
                     }
-                }));
+
+                    return {
+                        recordName: freshRecord.recordName,
+                        recordType: 'CD_Project',
+                        recordChangeTag: freshRecord.recordChangeTag, // Use FRESH tag
+                        fields: {
+                            CD_order: p.fields.CD_order // Use NEW order
+                        }
+                    };
+                });
 
                 // Only save if order actually changed (optimization)
-                // But for now, safe simply
+                // But for now, save simply
                 const result = await privateDB.saveRecords(recordsToUpdate, { zoneID });
                 if (result.hasErrors) throw new Error(result.errors[0].message);
 
@@ -1236,7 +1315,7 @@ function ProjectsList() {
             const privateDB = container.privateCloudDatabase;
             const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
 
-            // 1. Fetch task
+            // CRITICAL FIX: Fetch latest version before saving to avoid CAS Op-Lock failures
             const fetchResult = await privateDB.fetchRecords([id], { zoneID });
             if (fetchResult.hasErrors) throw new Error(fetchResult.errors[0].message);
             const taskRecord = fetchResult.records[0];
@@ -1250,6 +1329,7 @@ function ProjectsList() {
                     value: targetProject.recordName
                 };
             }
+            taskRecord.fields.CD_modifieddate = { value: Date.now() };
 
             // 3. Save
             const saveResult = await privateDB.saveRecords([taskRecord], { zoneID });
@@ -1283,7 +1363,7 @@ function ProjectsList() {
             const privateDB = container.privateCloudDatabase;
             const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
 
-            // 1. Fetch task
+            // CRITICAL FIX: Fetch latest version before saving to avoid CAS Op-Lock failures
             const fetchResult = await privateDB.fetchRecords([taskId], { zoneID });
             if (fetchResult.hasErrors) throw new Error(fetchResult.errors[0].message);
             const taskRecord = fetchResult.records[0];
@@ -1317,6 +1397,8 @@ function ProjectsList() {
             if (taskRecord.fields.CD_hideuntildate?.value === 1) {
                 updates.CD_hideuntildate = { value: 0 };
             }
+
+            updates.CD_modifieddate = { value: Date.now() };
 
             // Apply updates to task record
             Object.assign(taskRecord.fields, updates);
@@ -1371,7 +1453,7 @@ function ProjectsList() {
             const privateDB = container.privateCloudDatabase;
             const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
 
-            // 1. Fetch latest version
+            // CRITICAL FIX: Fetch latest version before saving to avoid CAS Op-Lock failures
             const fetchResult = await privateDB.fetchRecords([id], { zoneID });
             if (fetchResult.hasErrors) throw new Error(fetchResult.errors[0].message);
             const taskRecord = fetchResult.records[0];
@@ -1451,7 +1533,7 @@ function ProjectsList() {
             const privateDB = container.privateCloudDatabase;
             const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
 
-            // 1. Fetch
+            // CRITICAL FIX: Fetch latest version before saving to avoid CAS Op-Lock failures
             const fetchResult = await privateDB.fetchRecords([id], { zoneID });
             if (fetchResult.hasErrors) throw new Error(fetchResult.errors[0].message);
             const taskRecord = fetchResult.records[0];
@@ -1529,7 +1611,7 @@ function ProjectsList() {
             const privateDB = container.privateCloudDatabase;
             const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
 
-            // 1. Fetch
+            // CRITICAL FIX: Fetch latest version before saving to avoid CAS Op-Lock failures
             const fetchResult = await privateDB.fetchRecords([id], { zoneID });
             if (fetchResult.hasErrors) throw new Error(fetchResult.errors[0].message);
             const taskRecord = fetchResult.records[0];
@@ -1584,7 +1666,7 @@ function ProjectsList() {
             const privateDB = container.privateCloudDatabase;
             const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
 
-            // 1. Fetch
+            // CRITICAL FIX: Fetch latest version before saving to avoid CAS Op-Lock failures
             const fetchResult = await privateDB.fetchRecords([id], { zoneID });
             if (fetchResult.hasErrors) throw new Error(fetchResult.errors[0].message);
             const taskRecord = fetchResult.records[0];
@@ -1599,6 +1681,7 @@ function ProjectsList() {
                 const singleActions = projects.find(p => p.fields.CD_singleactions?.value === 1);
                 if (singleActions) updates.CD_project = { value: singleActions.recordName };
             }
+            updates.CD_modifieddate = { value: Date.now() };
 
             Object.assign(taskRecord.fields, updates);
 
@@ -2042,15 +2125,24 @@ function ProjectsList() {
 
         // Persist
         try {
+            // CRITICAL FIX: Fetch latest version before saving to avoid CAS Op-Lock failures
+            // Background sync might have updated the record tag since we last saw it
+            const fetchResult = await privateDB.fetchRecords([task.recordName], { zoneID });
+            if (fetchResult.hasErrors) throw new Error(fetchResult.errors[0].message);
+
+            const latestRecord = fetchResult.records[0];
+
             const recordToSave = {
-                recordName: task.recordName,
-                recordChangeTag: task.recordChangeTag,
+                recordName: latestRecord.recordName,
+                recordChangeTag: latestRecord.recordChangeTag, // Use the fresh tag!
                 fields: {
+                    ...latestRecord.fields, // Keep existing fields
                     CD_completed: { value: isCompleting ? 1 : 0 },
                     CD_ticked: { value: isCompleting ? 1 : 0 },
                     CD_modifieddate: { value: Date.now() }
                 }
             };
+
             const result = await privateDB.saveRecords([recordToSave], { zoneID });
             if (result.hasErrors) throw new Error(result.errors[0].message);
 
@@ -2218,6 +2310,11 @@ function ProjectsList() {
             const privateDB = container.privateCloudDatabase;
             const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
 
+            // CRITICAL FIX: Fetch latest version before saving to avoid CAS Op-Lock failures
+            const fetchResult = await privateDB.fetchRecords([updatedTask.recordName], { zoneID });
+            if (fetchResult.hasErrors) throw new Error(fetchResult.errors[0].message);
+            const latestRecord = fetchResult.records[0];
+
             const fieldsToSave: Record<string, any> = {
                 CD_modifieddate: { value: Date.now() }
             };
@@ -2226,15 +2323,11 @@ function ProjectsList() {
                 fieldsToSave[key] = { value: val };
             });
 
-            // Sync latest recordChangeTag from global state to avoid oplock errors
-            // (The selectedTaskDetails might be stale if background refresh happened)
-            const latestTaskVersion = tasks.find(t => t.recordName === updatedTask.recordName);
-            const currentChangeTag = latestTaskVersion?.recordChangeTag || updatedTask.recordChangeTag;
-
+            // Use fetched record's change tag
             const recordToSave = {
-                recordName: updatedTask.recordName,
-                recordChangeTag: currentChangeTag,
-                fields: fieldsToSave
+                recordName: latestRecord.recordName,
+                recordChangeTag: latestRecord.recordChangeTag, // Use fresh tag
+                fields: fieldsToSave // CloudKit merges fields, so we only send what changed + modifieddate
             };
 
             const result = await privateDB.saveRecords([recordToSave], { zoneID });
@@ -2249,6 +2342,7 @@ function ProjectsList() {
 
         } catch (err) {
             console.error('Failed to update task details:', err);
+            // Revert UI if needed or show error toast
         }
     };
 
