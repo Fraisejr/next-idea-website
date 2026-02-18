@@ -4,42 +4,36 @@ import { useEffect, useState, useMemo } from 'react';
 import { CloudKitProvider, useCloudKit } from '@/components/CloudKitProvider';
 import Navbar from '@/components/Navbar';
 import Footer from '@/components/Footer';
-import { ProjectRecord, TaskRecord } from '@/lib/cloudkit';
+import { ProjectRecord, TaskRecord, TagRecord } from '@/lib/cloudkit';
 import { TaskItem } from '@/components/app/TaskItem';
 import { Sidebar } from '@/components/app/Sidebar';
 import { TaskSection } from '@/components/app/TaskSection';
-import { Loader2, ListTodo, CheckCircle2, Pencil, Check, X, ClipboardList, Plus, Clock, RotateCcw, Calendar, Hourglass, Repeat, Moon, ChevronRight, Zap, Inbox, Keyboard, CalendarClock, CalendarDays } from 'lucide-react';
+import { Loader2, ListTodo, CheckCircle2, Pencil, Check, X, ClipboardList, Plus, Clock, RotateCcw, Calendar, Hourglass, Repeat, Moon, ChevronRight, Zap, Inbox, Keyboard, CalendarClock, CalendarDays, Tag } from 'lucide-react';
 
 // Helper to categorize tasks
-const getTaskSection = (task: TaskRecord): 'due' | 'nextActions' | 'waitingFor' | 'deferred' | 'somedayMaybe' => {
-    // Priority 1: Deferred (Hidden until future date)
-    // Must come BEFORE 'due' because deferred tasks also have active dates, but shouldn't be shown as 'due' yet
-    if (task.fields.CD_hideuntildate?.value === 1 && task.fields.CD_date?.value && task.fields.CD_date.value > Date.now()) {
-        return 'deferred';
-    }
-
-    // Priority 2: Due/Overdue (has active date AND is due today or past)
-    if (task.fields.CD_dateactive?.value === 1 && task.fields.CD_date?.value) {
-        const todayEnd = new Date();
-        todayEnd.setHours(23, 59, 59, 999);
-        if (task.fields.CD_date.value <= todayEnd.getTime()) {
-            return 'due';
-        }
-        // If future date, fall through to Next Actions (or Waiting/Someday if checked)
-    }
-
-    // Priority 3: Waiting For
+const getTaskSection = (task: TaskRecord) => {
+    if (task.fields.CD_completed?.value === 1) return 'completed';
     if (task.fields.CD_waitingfor?.value === 1) return 'waitingFor';
-
-    // Priority 4: Someday/Maybe
     if (task.fields.CD_someday?.value === 1) return 'somedayMaybe';
+
+    const now = Date.now();
+    if (task.fields.CD_dateactive?.value === 1 && task.fields.CD_date?.value) {
+        if (task.fields.CD_hideuntildate?.value === 1 && task.fields.CD_date.value > now) {
+            return 'deferred';
+        }
+        return 'due';
+    }
+
+    if (!task.fields.CD_project?.value) return 'inbox';
 
     return 'nextActions';
 };
 
+
 function ProjectsList() {
     const { container, isAuthenticated, isLoading, login } = useCloudKit();
     const [projects, setProjects] = useState<ProjectRecord[]>([]);
+    const [tags, setTags] = useState<TagRecord[]>([]);
     const [fetching, setFetching] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -64,6 +58,7 @@ function ProjectsList() {
     // Details Panel State
     const [selectedTaskDetails, setSelectedTaskDetails] = useState<TaskRecord | null>(null);
     const [linkInput, setLinkInput] = useState('');
+    const [taskTagMap, setTaskTagMap] = useState<Record<string, string[]>>({});
 
     // Search State
     const [searchQuery, setSearchQuery] = useState('');
@@ -922,6 +917,22 @@ function ProjectsList() {
                 if (records.length > 0 && !selectedProject) {
                     setSelectedProject(records[0]);
                 }
+
+                // --- FETCH TAGS ---
+                console.log('[CloudKit Projects] 🏷️ Fetching tags...');
+                const tagQuery = {
+                    recordType: 'CD_Tag',
+                    sortBy: [{ fieldName: 'CD_name', ascending: true }],
+                    resultsLimit: 100
+                };
+                const tagResult = await privateDB.performQuery(tagQuery, { zoneID: { zoneName: 'com.apple.coredata.cloudkit.zone' } });
+                if (!tagResult.hasErrors) {
+                    const fetchedTags = tagResult.records as TagRecord[];
+                    console.log('[CloudKit Projects] ✅ Received', fetchedTags.length, 'tags');
+                    setTags(fetchedTags);
+                } else {
+                    console.error('[CloudKit Projects] ❌ Error fetching tags:', tagResult.errors[0]);
+                }
             } catch (err: any) {
                 console.error('[CloudKit Projects] ❌ Fetch error:', err);
                 setError(err.message || 'Failed to fetch projects');
@@ -1011,10 +1022,102 @@ function ProjectsList() {
             }
         };
 
+
         if (!cacheInitialized) {
             initializeCache();
         }
     }, [container, isAuthenticated, cacheInitialized]);
+
+    // Fetch Task-Tag Relationships using CDMR Discovery
+    useEffect(() => {
+        const fetchTaskTagRelations = async () => {
+            if (!container) return;
+
+            console.log('[CloudKit Relations] 🚀 Starting fetch of Task-Tag join records (CDMR)...');
+
+            const privateDB = container.privateCloudDatabase;
+            const options = { zoneID: { zoneName: 'com.apple.coredata.cloudkit.zone' } };
+
+            // Now that 'CD_entityNames' is Sortable, we can sort by it to fetch all records.
+            // Using 'recordName' gave 'Unknown field' error, likely because it's a system field 
+            // not exposed in the same way for sorting in JS API without special handling.
+            const query = {
+                recordType: 'CDMR',
+                sortBy: [{
+                    fieldName: 'CD_entityNames',
+                    ascending: true
+                }],
+                resultsLimit: 500
+            };
+
+            try {
+                // console.log('[CloudKit Relations] Executing query:', query);
+                const result = await privateDB.performQuery(query, options);
+
+                if (result.hasErrors) {
+                    console.error('[CloudKit Relations] ❌ Error fetching CDMR records:', result.errors[0]);
+                    return;
+                }
+
+                const records = result.records;
+                console.log(`[CloudKit Relations] ✅ Found ${records.length} CDMR records involving Tags.`);
+
+                if (records.length > 0) {
+                    // console.log('[CloudKit Relations] Sample Record:', records[0]);
+                }
+
+                // Map task record names to their array of tag record names
+                const mapping: Record<string, string[]> = {};
+
+                records.forEach((rel: any) => {
+                    const fields = rel.fields;
+
+                    // CDMR Generic Fields (CD_entityNames, CD_recordNames)
+                    // CD_entityNames example: "MyTag:Tag:MyTask:Task" (It's a concatenated string of EntityName:EntityID?)
+                    // Actually, usually it's "Entity1:Entity2"
+                    // and CD_recordNames is "UUID1:UUID2"
+                    if (fields.CD_entityNames && fields.CD_recordNames) {
+                        const entities = fields.CD_entityNames.value;
+                        const recordNames = fields.CD_recordNames.value;
+
+                        // console.log(`[CloudKit Relations] Processing: entities="${entities}", names="${recordNames}"`);
+
+                        if (entities.includes('Task') && entities.includes('Tag')) {
+                            const entityParts = entities.split(':');
+                            const recordParts = recordNames.split(':');
+
+                            let taskRef = '';
+                            let tagRef = '';
+
+                            // The parts logic can be tricky depending on order.
+                            // Core Data usually sorts them alphabetically by entity name or something?
+                            // Let's look for "Task" substring in entityParts to find index.
+
+                            entityParts.forEach((part: string, index: number) => {
+                                if (part.includes('Task')) taskRef = recordParts[index];
+                                if (part.includes('Tag')) tagRef = recordParts[index];
+                            });
+
+                            if (taskRef && tagRef) {
+                                if (!mapping[taskRef]) mapping[taskRef] = [];
+                                mapping[taskRef].push(tagRef);
+                            }
+                        }
+                    }
+                });
+
+                console.log('[CloudKit Relations] 🗺️ Created relationship map:', mapping);
+                setTaskTagMap(mapping);
+
+            } catch (err) {
+                console.error('[CloudKit Relations] ❌ Unexpected error:', err);
+            }
+        };
+
+        if (isAuthenticated) {
+            fetchTaskTagRelations();
+        }
+    }, [isAuthenticated, container]);
 
     // Background refresh every 15 seconds (paused during editing)
     useEffect(() => {
@@ -2265,6 +2368,8 @@ function ProjectsList() {
                         dragOverTaskId={dragOverTaskId}
                         dragOverPosition={dragOverPosition}
                         projects={projects}
+                        tags={tags}
+                        taskTagMap={taskTagMap}
                         editTaskName={editTaskName}
                         setEditTaskName={setEditTaskName}
                         onDragStart={handleDragStart}
@@ -2918,6 +3023,7 @@ function ProjectsList() {
         </div >
     );
 }
+
 
 export default function AppPage() {
     return (

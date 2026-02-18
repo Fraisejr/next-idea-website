@@ -1,4 +1,4 @@
-import { ProjectRecord, TaskRecord } from '@/lib/cloudkit';
+import { ProjectRecord, TaskRecord, TagRecord } from '@/lib/cloudkit';
 import {
     Check,
     RotateCcw,
@@ -21,6 +21,8 @@ type TaskItemProps = {
     dragOverTaskId: string | null;
     dragOverPosition: 'top' | 'bottom' | null;
     projects: ProjectRecord[];
+    tags: TagRecord[];
+    taskTagMap: Record<string, string[]>;
     editTaskName: string;
     setEditTaskName: (name: string) => void;
 
@@ -45,6 +47,8 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     dragOverTaskId,
     dragOverPosition,
     projects,
+    tags,
+    taskTagMap,
     editTaskName,
     setEditTaskName,
     onDragStart,
@@ -59,6 +63,10 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     onInsertTask,
     onEditClick
 }) => {
+
+    // Find associated tags
+    const taskTags = taskTagMap[task.recordName]?.map(tagId => tags.find(t => t.recordName === tagId)).filter(Boolean) as TagRecord[] || [];
+
     const formatDate = (dateTimestamp: number) => {
         const date = new Date(dateTimestamp);
         const now = new Date();
@@ -189,13 +197,33 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                                 </div>
                             )}
                         </div>
-                        {/* Project Name (Only if not in project view) */}
-                        {viewMode !== 'project' && task.fields.CD_project?.value && (
-                            <span className="text-xs text-gray-400 mt-0.5">
-                                {projects.find(p => p.recordName === task.fields.CD_project?.value)?.fields.CD_name?.value}
-                            </span>
+                        {/* Project Name and Tags */}
+                        {(viewMode !== 'project' && task.fields.CD_project?.value || taskTags.length > 0) && (
+                            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                                {viewMode !== 'project' && task.fields.CD_project?.value && (
+                                    <span className="text-xs text-gray-400">
+                                        {projects.find(p => p.recordName === task.fields.CD_project?.value)?.fields.CD_name?.value}
+                                    </span>
+                                )}
+
+                                {taskTags.length > 0 && (
+                                    <div className="flex items-center gap-1.5">
+                                        {taskTags.map(tag => (
+                                            <span
+                                                key={tag.recordName}
+                                                className="text-[10px] px-1.5 py-0.5 rounded-md font-medium whitespace-nowrap"
+                                                style={{
+                                                    backgroundColor: tag.fields.CD_color?.value ? `${tag.fields.CD_color.value}20` : '#e5e7eb',
+                                                    color: tag.fields.CD_color?.value || '#6b7280'
+                                                }}
+                                            >
+                                                #{tag.fields.CD_name.value}
+                                            </span>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
                         )}
-                        {/* Show Project Name in History Mode (redundant check but keeping logic similar to before if needed, actually removed separate history check as generic check covers it) */}
                     </div>
                 )}
             </div>
