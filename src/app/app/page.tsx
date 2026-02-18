@@ -76,6 +76,8 @@ function ProjectsList() {
     // ============ TASK CACHE SYSTEM ============
     // Global cache for all active (non-completed) tasks
     const [allTasksCache, setAllTasksCache] = useState<Record<string, TaskRecord>>({});
+    // Sync Token for Differential Sync
+    const [syncToken, setSyncToken] = useState<string | null>(null);
 
     // Calculate Counts for Sidebar
     const sidebarCounts = useMemo(() => {
@@ -220,6 +222,7 @@ function ProjectsList() {
     const CACHE_REFRESH_INTERVAL = 15000; // 15 seconds
     const LOCALSTORAGE_CACHE_KEY = 'next-idea-task-cache';
     const LOCALSTORAGE_TIMESTAMP_KEY = 'next-idea-cache-timestamp';
+    const LOCALSTORAGE_SYNC_TOKEN_KEY = 'next-idea-sync-token';
 
     // Helper: Update cache and localStorage
     const updateTaskCache = (updater: (prev: Record<string, TaskRecord>) => Record<string, TaskRecord>) => {
@@ -989,6 +992,13 @@ function ProjectsList() {
                 localStorage.removeItem(LOCALSTORAGE_TIMESTAMP_KEY);
             }
 
+            // 1b. Load Sync Token
+            const savedToken = localStorage.getItem(LOCALSTORAGE_SYNC_TOKEN_KEY);
+            if (savedToken) {
+                setSyncToken(savedToken);
+                console.log('[Cache] 🔑 Loaded sync token from localStorage');
+            }
+
             // 2. Fetch all active tasks from CloudKit to populate/refresh cache
             try {
                 const privateDB = container.privateCloudDatabase;
@@ -1154,91 +1164,99 @@ function ProjectsList() {
                 return;
             }
 
+            // Sync Token logic
+            // If we have a token, we ask for changes. If not, we might need a full fetch OR fetch changes with null token.
+            // CloudKit JS fetchRecordZoneChanges with new options handles this.
+
             const now = Date.now();
             if (now - lastCacheRefresh < CACHE_REFRESH_INTERVAL) return;
 
-            console.log('[Cache] 🔄 Background refresh started...');
+            console.log(`[Cache] 🔄 Checking for changes... (Token: ${syncToken ? 'Yes' : 'No'})`);
 
             try {
                 const privateDB = container.privateCloudDatabase;
                 const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
 
-                const query = {
-                    recordType: 'CD_Task',
-                    filterBy: [{
-                        fieldName: 'CD_completed',
-                        comparator: 'NOT_EQUALS',
-                        fieldValue: { value: 1 }
-                    }],
+                const changesOptions = {
+                    zoneID: zoneID,
+                    previousServerChangeToken: syncToken,
                     desiredKeys: [
                         'CD_name', 'CD_id', 'CD_order', 'CD_project', 'CD_completed',
                         'CD_someday', 'CD_waitingfor', 'CD_dateactive',
+                        'CD_ticked',
                         'CD_date', 'CD_hideuntildate', 'CD_recurring', 'CD_recurrence', 'CD_recurrencetype',
-                        'CD_modifieddate', 'CD_link'
-                    ],
-                    resultsLimit: 500
+                        'CD_modifieddate', 'CD_link', 'CD_note'
+                    ]
                 };
-                const result = await privateDB.performQuery(query, { zoneID });
-                if (result.hasErrors) throw new Error(result.errors[0].message);
 
-                const tasks = result.records as TaskRecord[];
-                const freshTaskIds = new Set(tasks.map(t => t.recordName));
+                const response = await privateDB.fetchRecordZoneChanges(changesOptions);
 
-                // MERGE with existing cache instead of replacing
-                // This preserves any tasks being created/edited that haven't been saved yet
+                if (response.hasErrors) {
+                    const tokenError = response.errors.find((e: any) => e.ckErrorCode === 'CHANGE_TOKEN_EXPIRED');
+                    if (tokenError) {
+                        console.warn('[Cache] ⚠️ Work token expired. Resetting...');
+                        setSyncToken(null);
+                        localStorage.removeItem(LOCALSTORAGE_SYNC_TOKEN_KEY);
+                        // Should we force a full refresh? The next loop will fetch with null token.
+                        return;
+                    }
+                    throw new Error(response.errors[0].message);
+                }
+
+                const zoneChanges = response.zones[0];
+                const changedRecords = zoneChanges.records;
+                const deletedRecordIDs = zoneChanges.deleted;
+                const newSyncToken = zoneChanges.newServerChangeToken;
+
+                if (changedRecords.length === 0 && deletedRecordIDs.length === 0) {
+                    // console.log('[Cache] ✅ No changes.'); // Reduce noise
+                    if (newSyncToken && newSyncToken !== syncToken) {
+                        setSyncToken(newSyncToken);
+                        localStorage.setItem(LOCALSTORAGE_SYNC_TOKEN_KEY, newSyncToken);
+                    }
+                    setLastCacheRefresh(now);
+                    return;
+                }
+
+                console.log(`[Cache] ⚡️ Delta: ${changedRecords.length} updated, ${deletedRecordIDs.length} deleted.`);
+
+                // Update Cache via helper
                 updateTaskCache(prev => {
-                    const merged = { ...prev }; // Start with existing cache
+                    const next = { ...prev };
 
-                    // Update with fresh data from CloudKit
-                    tasks.forEach(task => {
-                        merged[task.recordName] = task;
-                    });
-
-                    // Remove tasks that disappeared from CloudKit (likely completed on another device)
-                    // But keep tasks that are currently being edited locally
-                    Object.keys(merged).forEach(recordName => {
-                        if (!freshTaskIds.has(recordName) && recordName !== editingTaskId && recordName !== 'new-task') {
-                            // Protect tasks modified locally in the last 10 seconds (likely just saved but not yet indexed by CloudKit query)
-                            const localTask = merged[recordName];
-                            const lastModified = localTask.fields.CD_modifieddate?.value || 0;
-                            const isRecent = (Date.now() - lastModified) < 10000;
-
-                            if (isRecent) {
-                                console.log(`[Cache] 🛡️ Protecting recent task ${recordName} from removal (waiting for index)`);
-                            } else {
-                                console.log(`[Cache] 🗑️ Removing task ${recordName} (no longer in CloudKit, likely completed elsewhere)`);
-                                delete merged[recordName];
-                            }
+                    // 1. Process Updates
+                    changedRecords.forEach((record: any) => {
+                        if (record.recordType === 'CD_Task') {
+                            next[record.recordName] = record as TaskRecord;
                         }
                     });
 
-                    return merged;
+                    // 2. Process Deletes
+                    deletedRecordIDs.forEach((del: any) => {
+                        delete next[del.recordName];
+                    });
+
+                    return next;
                 });
+
+                // Save new token
+                if (newSyncToken) {
+                    setSyncToken(newSyncToken);
+                    localStorage.setItem(LOCALSTORAGE_SYNC_TOKEN_KEY, newSyncToken);
+                }
+
                 setLastCacheRefresh(now);
-                console.log(`[Cache] ✅ Refreshed ${tasks.length} tasks (merged with existing cache)`);
-            } catch (error) {
-                console.error('[Cache] ❌ Background refresh failed:', error);
+
+            } catch (err) {
+                console.error('[Cache] ❌ Sync error:', err);
             }
         };
 
-        // Refresh immediately if stale, then set up interval
-        refreshCache();
-        const intervalId = setInterval(refreshCache, CACHE_REFRESH_INTERVAL);
+        const intervalId = setInterval(refreshCache, 15000);
+        return () => clearInterval(intervalId);
 
-        // Resume refresh immediately when tab becomes visible
-        const handleVisibilityChange = () => {
-            if (!document.hidden) {
-                console.log('[Cache] 👀 Tab visible, triggering immediate refresh');
-                refreshCache();
-            }
-        };
-        document.addEventListener('visibilitychange', handleVisibilityChange);
+    }, [container, isAuthenticated, cacheInitialized, editingTaskId, editingId, syncToken, lastCacheRefresh]);
 
-        return () => {
-            clearInterval(intervalId);
-            document.removeEventListener('visibilitychange', handleVisibilityChange);
-        };
-    }, [container, isAuthenticated, cacheInitialized, lastCacheRefresh, editingTaskId, editingId]);
 
     // Drag and Drop Handlers
     const [dragOverProjectId, setDragOverProjectId] = useState<string | null>(null);
