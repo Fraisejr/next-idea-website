@@ -58,15 +58,17 @@ function ProjectsList() {
     // Details Panel State
     const [selectedTaskDetails, setSelectedTaskDetails] = useState<TaskRecord | null>(null);
     const [linkInput, setLinkInput] = useState('');
+    const [noteInput, setNoteInput] = useState('');
     const [taskTagMap, setTaskTagMap] = useState<Record<string, string[]>>({});
 
     // Search State
     const [searchQuery, setSearchQuery] = useState('');
 
-    // Sync link input when selected task changes
+    // Sync link/note input when selected task changes
     useEffect(() => {
         if (selectedTaskDetails) {
             setLinkInput(selectedTaskDetails.fields.CD_link?.value || '');
+            setNoteInput(selectedTaskDetails.fields.CD_note?.value || '');
         }
     }, [selectedTaskDetails?.recordName]);
 
@@ -813,7 +815,7 @@ function ProjectsList() {
             }
 
             // ? - Show keyboard shortcuts
-            if (e.key === '?' && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
+            if (e.key === '?' && !e.metaKey && !e.ctrlKey) {
                 e.preventDefault();
                 setShowShortcuts(true);
             }
@@ -946,6 +948,22 @@ function ProjectsList() {
         }
     }, [isAuthenticated, container]); // Run once on auth
 
+    // Debounced Note Save
+    useEffect(() => {
+        if (!selectedTaskDetails) return;
+
+        // Don't save if value hasn't changed from source
+        const currentNote = selectedTaskDetails.fields.CD_note?.value || '';
+        if (noteInput === currentNote) return;
+
+        const timeoutId = setTimeout(() => {
+            console.log('[Debounce] Saving note...', noteInput);
+            handleUpdateTaskDetail('CD_note', noteInput);
+        }, 1500);
+
+        return () => clearTimeout(timeoutId);
+    }, [noteInput, selectedTaskDetails]);
+
     // ========== CACHE INITIALIZATION & REFRESH ==========
     // Initialize cache from localStorage and fetch all tasks on authentication
     useEffect(() => {
@@ -987,7 +1005,7 @@ function ProjectsList() {
                         'CD_name', 'CD_id', 'CD_order', 'CD_project', 'CD_completed',
                         'CD_someday', 'CD_waitingfor', 'CD_dateactive',
                         'CD_date', 'CD_hideuntildate', 'CD_recurring', 'CD_recurrence', 'CD_recurrencetype',
-                        'CD_modifieddate', 'CD_link'
+                        'CD_modifieddate', 'CD_link', 'CD_note'
                     ],
                     resultsLimit: 500 // Fetch all active tasks
                 };
@@ -1130,6 +1148,12 @@ function ProjectsList() {
         }
 
         const refreshCache = async () => {
+            // OPTIMIZATION: Stop polling if tab is hidden to save CloudKit quota
+            if (document.hidden) {
+                console.log('[Cache] 😴 Tab hidden, skipping background refresh');
+                return;
+            }
+
             const now = Date.now();
             if (now - lastCacheRefresh < CACHE_REFRESH_INTERVAL) return;
 
@@ -1201,7 +1225,19 @@ function ProjectsList() {
         refreshCache();
         const intervalId = setInterval(refreshCache, CACHE_REFRESH_INTERVAL);
 
-        return () => clearInterval(intervalId);
+        // Resume refresh immediately when tab becomes visible
+        const handleVisibilityChange = () => {
+            if (!document.hidden) {
+                console.log('[Cache] 👀 Tab visible, triggering immediate refresh');
+                refreshCache();
+            }
+        };
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+
+        return () => {
+            clearInterval(intervalId);
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+        };
     }, [container, isAuthenticated, cacheInitialized, lastCacheRefresh, editingTaskId, editingId]);
 
     // Drag and Drop Handlers
@@ -2735,11 +2771,11 @@ function ProjectsList() {
                                 </h3>
                                 <div className="space-y-2">
                                     <div className="flex justify-between items-center py-2 px-3 bg-gray-50 rounded-lg">
-                                        <span className="text-gray-700">Create task at bottom</span>
+                                        <span className="text-gray-700">Create task at the bottom</span>
                                         <kbd className="px-3 py-1 bg-white border border-gray-300 rounded shadow-sm font-mono text-sm">N</kbd>
                                     </div>
                                     <div className="flex justify-between items-center py-2 px-3 bg-gray-50 rounded-lg">
-                                        <span className="text-gray-700">Create task at top</span>
+                                        <span className="text-gray-700">Create task at the top</span>
                                         <kbd className="px-3 py-1 bg-white border border-gray-300 rounded shadow-sm font-mono text-sm">Shift + N</kbd>
                                     </div>
                                 </div>
@@ -2753,11 +2789,11 @@ function ProjectsList() {
                                 </h3>
                                 <div className="space-y-2">
                                     <div className="flex justify-between items-center py-2 px-3 bg-gray-50 rounded-lg">
-                                        <span className="text-gray-700">Create project at bottom</span>
+                                        <span className="text-gray-700">Create project at the bottom</span>
                                         <kbd className="px-3 py-1 bg-white border border-gray-300 rounded shadow-sm font-mono text-sm">P</kbd>
                                     </div>
                                     <div className="flex justify-between items-center py-2 px-3 bg-gray-50 rounded-lg">
-                                        <span className="text-gray-700">Create project at top</span>
+                                        <span className="text-gray-700">Create project at the top</span>
                                         <kbd className="px-3 py-1 bg-white border border-gray-300 rounded shadow-sm font-mono text-sm">Shift + P</kbd>
                                     </div>
                                 </div>
@@ -2771,12 +2807,12 @@ function ProjectsList() {
                                 </h3>
                                 <div className="space-y-2">
                                     <div className="flex justify-between items-center py-2 px-3 bg-gray-50 rounded-lg">
-                                        <span className="text-gray-700">Show this help</span>
+                                        <span className="text-gray-700">Show this help screen</span>
                                         <kbd className="px-3 py-1 bg-white border border-gray-300 rounded shadow-sm font-mono text-sm">?</kbd>
                                     </div>
                                     <div className="flex justify-between items-center py-2 px-3 bg-gray-50 rounded-lg">
-                                        <span className="text-gray-700">Close modals</span>
-                                        <kbd className="px-3 py-1 bg-white border border-gray-300 rounded shadow-sm font-mono text-sm">Esc</kbd>
+                                        <span className="text-gray-700">Search for tasks and projects</span>
+                                        <kbd className="px-3 py-1 bg-white border border-gray-300 rounded shadow-sm font-mono text-sm">F</kbd>
                                     </div>
                                 </div>
                             </div>
@@ -2808,8 +2844,9 @@ function ProjectsList() {
                         </div>
 
                         <div className="flex-1 overflow-y-auto p-6 space-y-6">
-                            {/* Date Field */}
-                            {/* Date & Reminder Section */}
+
+
+                            {/* Link Field */}
                             <div className="space-y-4">
                                 <div className="flex items-center gap-4">
                                     {/* Date Toggle */}
@@ -3003,6 +3040,25 @@ function ProjectsList() {
                                 </div>
 
 
+
+                            </div>
+
+                            {/* Notes Field */}
+                            <div>
+                                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                                    Notes
+                                </label>
+                                <textarea
+                                    value={noteInput}
+                                    onChange={(e) => setNoteInput(e.target.value)}
+                                    placeholder="Add notes..."
+                                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all resize-y min-h-[100px]"
+                                />
+                                <div className="flex justify-end mt-1">
+                                    <span className="text-[10px] text-gray-400">
+                                        {noteInput === (selectedTaskDetails?.fields.CD_note?.value || '') ? 'Saved' : 'Typing...'}
+                                    </span>
+                                </div>
                             </div>
                         </div>
 

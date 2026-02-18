@@ -46,6 +46,17 @@ export interface TaskRecord {
         CD_recurrencetype?: { value: string }; // String
         CD_hideuntildate?: { value: number }; // 0/1
         CD_link?: { value: string }; // URL String
+        CD_note?: { value: string }; // Notes String
+    };
+}
+
+export interface TagRecord {
+    recordName: string;
+    recordChangeTag: string;
+    recordType: 'CD_Tag';
+    fields: {
+        CD_name: { value: string };
+        CD_color?: { value: string };
     };
 }
 
