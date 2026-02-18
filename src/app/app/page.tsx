@@ -2538,16 +2538,7 @@ function ProjectsList() {
     };
 
 
-    if (isLoading) {
-        return (
-            <div className="flex items-center justify-center min-h-[50vh]">
-                <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
-            </div>
-        );
-    }
-
-    if (!isAuthenticated) {
-        // [Existing Login UI]
+    if (isLoading || !isAuthenticated) {
         return (
             <div className="flex flex-col items-center justify-center min-h-[60vh] text-center px-4">
                 <div className="w-20 h-20 bg-blue-50 rounded-2xl flex items-center justify-center mb-6 text-blue-600">
@@ -2555,7 +2546,14 @@ function ProjectsList() {
                 </div>
                 <h1 className="text-3xl font-bold text-gray-900 mb-4">Log in to Next Idea</h1>
                 <p className="text-gray-600 mb-8 max-w-md">Access your projects and tasks directly from your browser.</p>
-                <div id="apple-sign-in-button" className="transition-transform hover:scale-105 empty:before:content-['Coming_soon'] empty:before:text-3xl empty:before:text-gray-400 empty:before:font-bold"></div>
+                {/* Always in DOM so CloudKit can inject the button during setUpAuth() */}
+                <div id="apple-sign-in-button" className="transition-transform hover:scale-105 min-h-[44px] flex items-center justify-center"></div>
+                {isLoading && (
+                    <div className="mt-4 flex items-center gap-2 text-gray-400 text-sm">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Connecting...</span>
+                    </div>
+                )}
             </div>
         );
     }

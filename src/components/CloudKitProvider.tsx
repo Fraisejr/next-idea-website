@@ -3,7 +3,6 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { CLOUDKIT_API_TOKEN, CLOUDKIT_CONTAINER_ID, CLOUDKIT_ENV } from '@/lib/cloudkit';
 
-// Define CloudKit types loosely to avoid full type definition overhead
 type CloudKitContextType = {
     container: any | null;
     isAuthenticated: boolean;
@@ -32,7 +31,6 @@ export function CloudKitProvider({ children }: { children: ReactNode }) {
 
     useEffect(() => {
         const initCloudKit = async () => {
-            // Poll for CloudKit script to be loaded
             let attempts = 0;
             while (!window.CloudKit && attempts < 20) {
                 await new Promise(r => setTimeout(r, 200));
@@ -55,6 +53,10 @@ export function CloudKitProvider({ children }: { children: ReactNode }) {
                             signInButton: {
                                 id: 'apple-sign-in-button',
                                 theme: 'black'
+                            },
+                            signOutButton: {
+                                id: 'apple-sign-out-button',
+                                theme: 'black'
                             }
                         },
                         environment: CLOUDKIT_ENV
@@ -65,29 +67,27 @@ export function CloudKitProvider({ children }: { children: ReactNode }) {
                 if (!ckContainer) throw new Error('Failed to get default container');
                 setContainer(ckContainer);
 
-                // AUTH_PERSIST_ERROR can occur on hard refresh when the CloudKit session
-                // cookie isn't accessible yet. Retry once after a short delay.
-                let authInfo: any = null;
-                try {
-                    authInfo = await ckContainer.setUpAuth();
-                } catch (authErr: any) {
-                    const isPersistError = authErr?.ckErrorCode === 'AUTH_PERSIST_ERROR' ||
-                        authErr?.message?.includes('ckSession');
-                    if (isPersistError) {
-                        // Wait for session storage to become available, then retry
-                        await new Promise(r => setTimeout(r, 1000));
-                        authInfo = await ckContainer.setUpAuth();
-                    } else {
-                        throw authErr;
-                    }
-                }
+                ckContainer.whenUserSignsIn().then((userIdentity: any) => {
+                    setIsAuthenticated(true);
+                    setCurrentUser(userIdentity);
+                });
+                ckContainer.whenUserSignsOut().then(() => {
+                    setIsAuthenticated(false);
+                    setCurrentUser(null);
+                });
 
+                const authInfo = await ckContainer.setUpAuth();
                 if (authInfo) {
                     setIsAuthenticated(true);
                     setCurrentUser(authInfo.userIdentity ?? authInfo);
                 }
             } catch (err: any) {
-                console.error('CloudKit initialization error:', err);
+                // AUTH_PERSIST_ERROR on hard refresh is expected — ignore it.
+                // The user can navigate away and back to /app/ to restore their session.
+                if (err?.ckErrorCode !== 'AUTH_PERSIST_ERROR' &&
+                    !err?._reason?.includes('ckSession')) {
+                    console.error('CloudKit initialization error:', err);
+                }
             } finally {
                 setIsLoading(false);
             }
@@ -96,9 +96,7 @@ export function CloudKitProvider({ children }: { children: ReactNode }) {
         initCloudKit();
     }, []);
 
-    const login = async () => {
-        if (!container) return;
-    };
+    const login = async () => { };
 
     const logout = async () => {
         if (!container) return;
@@ -110,19 +108,6 @@ export function CloudKitProvider({ children }: { children: ReactNode }) {
             console.error('Logout error', err);
         }
     };
-
-    // Listen for auth changes
-    useEffect(() => {
-        if (!container) return;
-
-        // CloudKit JS often exposes event listeners
-        // We can use the promise returned by setUpAuth in the init for initial state.
-        // For runtime changes (like signing out elsewhere), we might poll or listen to events if documented.
-        // Basic implementation: trust the internal state we set.
-
-        // One key thing: CloudKit JS usually renders a button div. 
-        // We will let the `app/page.tsx` handle the button rendering using the container.
-    }, [container]);
 
     return (
         <CloudKitContext.Provider value={{
