@@ -46,7 +46,6 @@ export function CloudKitProvider({ children }: { children: ReactNode }) {
             }
 
             try {
-                // Configure CloudKit
                 window.CloudKit.configure({
                     containers: [{
                         containerIdentifier: CLOUDKIT_CONTAINER_ID,
@@ -62,40 +61,33 @@ export function CloudKitProvider({ children }: { children: ReactNode }) {
                     }]
                 });
 
-                console.log('CloudKit configured successfully');
-                console.log('  Container ID:', CLOUDKIT_CONTAINER_ID);
-                console.log('  Environment:', CLOUDKIT_ENV);
-
                 const ckContainer = window.CloudKit.getDefaultContainer();
-                if (!ckContainer) {
-                    throw new Error("Failed to get default container");
-                }
-
+                if (!ckContainer) throw new Error('Failed to get default container');
                 setContainer(ckContainer);
 
-                // Initialize Auth
-                console.log('Setting up CloudKit authentication...');
-                const authInfo = await ckContainer.setUpAuth();
-                console.log('Auth setup complete:', authInfo);
+                // AUTH_PERSIST_ERROR can occur on hard refresh when the CloudKit session
+                // cookie isn't accessible yet. Retry once after a short delay.
+                let authInfo: any = null;
+                try {
+                    authInfo = await ckContainer.setUpAuth();
+                } catch (authErr: any) {
+                    const isPersistError = authErr?.ckErrorCode === 'AUTH_PERSIST_ERROR' ||
+                        authErr?.message?.includes('ckSession');
+                    if (isPersistError) {
+                        // Wait for session storage to become available, then retry
+                        await new Promise(r => setTimeout(r, 1000));
+                        authInfo = await ckContainer.setUpAuth();
+                    } else {
+                        throw authErr;
+                    }
+                }
 
-                if (authInfo && authInfo.userIdentity) {
-                    console.log('User is authenticated:', authInfo.userIdentity);
+                if (authInfo) {
                     setIsAuthenticated(true);
-                    setCurrentUser(authInfo.userIdentity);
-                } else if (authInfo) {
-                    console.log('Auth info received but no userIdentity:', authInfo);
-                    setIsAuthenticated(true);
-                    setCurrentUser(authInfo);
-                } else {
-                    console.log('User is not authenticated. CloudKit should auto-render button via signInButton config.');
+                    setCurrentUser(authInfo.userIdentity ?? authInfo);
                 }
             } catch (err: any) {
                 console.error('CloudKit initialization error:', err);
-                console.error('Error details:', {
-                    message: err.message,
-                    stack: err.stack,
-                    name: err.name
-                });
             } finally {
                 setIsLoading(false);
             }
@@ -106,21 +98,12 @@ export function CloudKitProvider({ children }: { children: ReactNode }) {
 
     const login = async () => {
         if (!container) return;
-        // The Sign in with Apple button (rendered by CloudKit) handles the flow.
-        // We don't need to trigger it programmatically (and usually can't).
-        console.log('User should click the Apple Sign In button.');
     };
 
     const logout = async () => {
-        if (!container) {
-            console.warn('Logout called but container is null');
-            return;
-        }
-        console.log('Attempting to sign out...');
+        if (!container) return;
         try {
-            // signOut is directly on the container in CloudKit JS 2.0+
             await container.signOut();
-            console.log('Sign out successful');
             setIsAuthenticated(false);
             setCurrentUser(null);
         } catch (err) {
