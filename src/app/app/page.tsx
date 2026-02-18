@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import { CloudKitProvider, useCloudKit } from '@/components/CloudKitProvider';
 import Navbar from '@/components/Navbar';
 import Footer from '@/components/Footer';
@@ -28,6 +28,7 @@ const getTaskSection = (task: TaskRecord) => {
 
     return 'nextActions';
 };
+
 
 
 function ProjectsList() {
@@ -78,6 +79,10 @@ function ProjectsList() {
     const [allTasksCache, setAllTasksCache] = useState<Record<string, TaskRecord>>({});
     // Sync Token for Differential Sync
     const [syncToken, setSyncToken] = useState<string | null>(null);
+    // Ref mirrors syncToken so the interval callback always reads the latest value
+    // without needing syncToken in the useEffect dependency array (which would cause
+    // the interval to be torn down and recreated on every sync, preventing it from firing).
+    const syncTokenRef = useRef<string | null>(null);
 
     // Calculate Counts for Sidebar
     const sidebarCounts = useMemo(() => {
@@ -218,7 +223,10 @@ function ProjectsList() {
         return { projectsWithMatches: projMatches, listsWithMatches: listMatches, matchingTaskIds: taskMatches };
     }, [searchQuery, allTasksCache]);
     const [cacheInitialized, setCacheInitialized] = useState(false);
-    const [lastCacheRefresh, setLastCacheRefresh] = useState<number>(0);
+    // Use a ref for lastCacheRefresh — it's only used for throttling inside the interval,
+    // never rendered. Keeping it as state would add it to the deps array and cause the
+    // interval to be recreated every 15s, which prevents it from ever firing.
+    const lastCacheRefreshRef = useRef<number>(0);
     const CACHE_REFRESH_INTERVAL = 15000; // 15 seconds
     const LOCALSTORAGE_CACHE_KEY = 'next-idea-task-cache';
     const LOCALSTORAGE_TIMESTAMP_KEY = 'next-idea-cache-timestamp';
@@ -461,7 +469,7 @@ function ProjectsList() {
                 // Without this, CloudKit sync fails on iOS
                 const recordName = crypto.randomUUID();
 
-                console.log('[CloudKit Sync] Creating new task with recordName:', recordName);
+
 
                 // Find Single Actions project for Next Actions view or Someday view
                 const singleActionsProject = (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due' || viewMode === 'waiting' || viewMode === 'deferred')
@@ -484,7 +492,7 @@ function ProjectsList() {
                     }
                 };
 
-                console.log('[CloudKit Sync] Saving new task:', newRecord);
+
                 const saveResult = await privateDB.saveRecords([newRecord], { zoneID });
 
                 if (saveResult.hasErrors) {
@@ -493,7 +501,7 @@ function ProjectsList() {
                 }
 
                 const savedRecord = saveResult.records[0];
-                console.log('[CloudKit Sync] ✅ Task created successfully:', savedRecord.recordName);
+
 
                 // Replace temp task with real one
                 setTasks(prev => prev.map(t =>
@@ -864,11 +872,11 @@ function ProjectsList() {
     useEffect(() => {
         const fetchProjects = async () => {
             if (!container) {
-                console.log('[CloudKit Projects] Container not available');
+
                 return;
             }
 
-            console.log('[CloudKit Projects] 🚀 Fetching projects from CloudKit...');
+
             setFetching(true);
             setError(null);
             try {
@@ -881,50 +889,28 @@ function ProjectsList() {
                 };
                 const options = { zoneID: { zoneName: 'com.apple.coredata.cloudkit.zone' } };
 
-                console.log('[CloudKit Projects] Executing query:', query);
                 const result = await privateDB.performQuery(query, options);
-
                 if (result.hasErrors) {
-                    console.error('[CloudKit Projects] ❌ Query errors:', result.errors);
+                    console.error('[CloudKit] ❌ Error fetching projects:', result.errors);
                     throw new Error(result.errors[0].message);
                 }
 
                 let records = result.records as ProjectRecord[];
-                console.log(`[CloudKit Projects] ✅ Received ${records.length} total projects from CloudKit`);
-                console.log('[CloudKit Projects] Raw projects:', records.map(p => ({
-                    name: p.fields.CD_name?.value,
-                    completed: p.fields.CD_completed?.value,
-                    singleActions: p.fields.CD_singleactions?.value,
-                    order: p.fields.CD_order?.value
-                })));
-
-                const beforeFilter = records.length;
                 records = records.filter(p => !p.fields.CD_completed || p.fields.CD_completed.value !== 1);
-                console.log(`[CloudKit Projects] 🔍 Filtered out ${beforeFilter - records.length} completed projects`);
-
                 records.sort((a, b) => {
                     const isSingleA = a.fields.CD_singleactions?.value === 1;
                     const isSingleB = b.fields.CD_singleactions?.value === 1;
                     if (isSingleA && !isSingleB) return -1;
                     if (!isSingleA && isSingleB) return 1;
-                    const orderA = a.fields.CD_order?.value ?? 0;
-                    const orderB = b.fields.CD_order?.value ?? 0;
-                    return orderA - orderB;
-                });
-
-                console.log(`[CloudKit Projects] 📋 Final project list (${records.length} projects):`);
-                records.forEach((p, i) => {
-                    console.log(`  ${i + 1}. "${p.fields.CD_name?.value}" (order: ${p.fields.CD_order?.value})`);
+                    return (a.fields.CD_order?.value ?? 0) - (b.fields.CD_order?.value ?? 0);
                 });
 
                 setProjects(records);
-                // Select first project by default if none selected
                 if (records.length > 0 && !selectedProject) {
                     setSelectedProject(records[0]);
                 }
 
                 // --- FETCH TAGS ---
-                console.log('[CloudKit Projects] 🏷️ Fetching tags...');
                 const tagQuery = {
                     recordType: 'CD_Tag',
                     sortBy: [{ fieldName: 'CD_name', ascending: true }],
@@ -932,11 +918,9 @@ function ProjectsList() {
                 };
                 const tagResult = await privateDB.performQuery(tagQuery, { zoneID: { zoneName: 'com.apple.coredata.cloudkit.zone' } });
                 if (!tagResult.hasErrors) {
-                    const fetchedTags = tagResult.records as TagRecord[];
-                    console.log('[CloudKit Projects] ✅ Received', fetchedTags.length, 'tags');
-                    setTags(fetchedTags);
+                    setTags(tagResult.records as TagRecord[]);
                 } else {
-                    console.error('[CloudKit Projects] ❌ Error fetching tags:', tagResult.errors[0]);
+                    console.error('[CloudKit] ❌ Error fetching tags:', tagResult.errors[0]);
                 }
             } catch (err: any) {
                 console.error('[CloudKit Projects] ❌ Fetch error:', err);
@@ -960,7 +944,7 @@ function ProjectsList() {
         if (noteInput === currentNote) return;
 
         const timeoutId = setTimeout(() => {
-            console.log('[Debounce] Saving note...', noteInput);
+
             handleUpdateTaskDetail('CD_note', noteInput);
         }, 1500);
 
@@ -973,7 +957,7 @@ function ProjectsList() {
         const initializeCache = async () => {
             if (!container || !isAuthenticated) return;
 
-            console.log('[Cache] 🚀 Initializing task cache...');
+
 
             // 1. Hydrate from localStorage first for instant display
             try {
@@ -983,8 +967,8 @@ function ProjectsList() {
                 if (cachedData) {
                     const parsed = JSON.parse(cachedData);
                     setAllTasksCache(parsed);
-                    setLastCacheRefresh(cachedTimestamp ? parseInt(cachedTimestamp) : 0);
-                    console.log(`[Cache] ✅ Hydrated ${Object.keys(parsed).length} tasks from localStorage`);
+                    lastCacheRefreshRef.current = cachedTimestamp ? parseInt(cachedTimestamp) : 0;
+
                 }
             } catch (error) {
                 console.warn('[Cache] Failed to hydrate from localStorage:', error);
@@ -996,7 +980,6 @@ function ProjectsList() {
             const savedToken = localStorage.getItem(LOCALSTORAGE_SYNC_TOKEN_KEY);
             if (savedToken) {
                 setSyncToken(savedToken);
-                console.log('[Cache] 🔑 Loaded sync token from localStorage');
             }
 
             // 2. Fetch all active tasks from CloudKit to populate/refresh cache
@@ -1020,7 +1003,6 @@ function ProjectsList() {
                     resultsLimit: 500 // Fetch all active tasks
                 };
 
-                console.log('[Cache] Fetching all active tasks from CloudKit...');
                 const result = await privateDB.performQuery(query, { zoneID });
 
                 if (result.hasErrors) {
@@ -1029,20 +1011,12 @@ function ProjectsList() {
                 }
 
                 const tasks = result.records as TaskRecord[];
-                console.log(`[Cache] ✅ Fetched ${tasks.length} active tasks from CloudKit`);
-
-                // Build cache object indexed by recordName
                 const cacheObject: Record<string, TaskRecord> = {};
-                tasks.forEach(task => {
-                    cacheObject[task.recordName] = task;
-                });
+                tasks.forEach(task => { cacheObject[task.recordName] = task; });
 
-                // Update cache and localStorage
                 updateTaskCache(() => cacheObject);
-                setLastCacheRefresh(Date.now());
+                lastCacheRefreshRef.current = Date.now();
                 setCacheInitialized(true);
-
-                console.log('[Cache] 🎉 Cache initialization complete');
             } catch (error: any) {
                 console.error('[Cache] ❌ Initialization failed:', error);
                 // Still mark as initialized to prevent infinite loops
@@ -1061,7 +1035,7 @@ function ProjectsList() {
         const fetchTaskTagRelations = async () => {
             if (!container) return;
 
-            console.log('[CloudKit Relations] 🚀 Starting fetch of Task-Tag join records (CDMR)...');
+
 
             const privateDB = container.privateCloudDatabase;
             const options = { zoneID: { zoneName: 'com.apple.coredata.cloudkit.zone' } };
@@ -1088,7 +1062,7 @@ function ProjectsList() {
                 }
 
                 const records = result.records;
-                console.log(`[CloudKit Relations] ✅ Found ${records.length} CDMR records involving Tags.`);
+
 
                 if (records.length > 0) {
                     // console.log('[CloudKit Relations] Sample Record:', records[0]);
@@ -1134,7 +1108,7 @@ function ProjectsList() {
                     }
                 });
 
-                console.log('[CloudKit Relations] 🗺️ Created relationship map:', mapping);
+
                 setTaskTagMap(mapping);
 
             } catch (err) {
@@ -1147,115 +1121,88 @@ function ProjectsList() {
         }
     }, [isAuthenticated, container]);
 
-    // Background refresh every 15 seconds (paused during editing)
+    // ── Background Sync ────────────────────────────────────────────────────
+    // Every 15s, query for tasks modified since the last successful sync.
+    // Uses the same performQuery API as the initial cache load — proven to work.
     useEffect(() => {
         if (!container || !isAuthenticated || !cacheInitialized) return;
+        if (editingTaskId || editingId) return;
 
-        // PAUSE refresh if user is editing a task to prevent overwriting their changes
-        if (editingTaskId || editingId) {
-            console.log('[Cache] ⏸️ Background refresh paused during editing');
-            return;
-        }
+        const privateDB = container.privateCloudDatabase;
+        const ZONE_ID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
 
-        const refreshCache = async () => {
-            // OPTIMIZATION: Stop polling if tab is hidden to save CloudKit quota
-            if (document.hidden) {
-                console.log('[Cache] 😴 Tab hidden, skipping background refresh');
-                return;
-            }
+        // Track the last sync time in a ref so the interval always reads the latest value
+        // Initialize to "now minus one interval" so the first run fetches recent changes
+        const lastSyncTimeRef = { current: Date.now() - CACHE_REFRESH_INTERVAL };
 
-            // Sync Token logic
-            // If we have a token, we ask for changes. If not, we might need a full fetch OR fetch changes with null token.
-            // CloudKit JS fetchRecordZoneChanges with new options handles this.
+        const fetchChanges = async () => {
+            if (document.hidden) return;
 
-            const now = Date.now();
-            if (now - lastCacheRefresh < CACHE_REFRESH_INTERVAL) return;
-
-            console.log(`[Cache] 🔄 Checking for changes... (Token: ${syncToken ? 'Yes' : 'No'})`);
+            const since = lastSyncTimeRef.current; // milliseconds — matches how CD_modifieddate is stored
 
             try {
-                const privateDB = container.privateCloudDatabase;
-                const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
-
-                const changesOptions = {
-                    zoneID: zoneID,
-                    previousServerChangeToken: syncToken,
+                const query = {
+                    recordType: 'CD_Task',
+                    filterBy: [{
+                        fieldName: 'CD_modifieddate',
+                        comparator: 'GREATER_THAN',
+                        fieldValue: { value: since }
+                    }],
                     desiredKeys: [
                         'CD_name', 'CD_id', 'CD_order', 'CD_project', 'CD_completed',
                         'CD_someday', 'CD_waitingfor', 'CD_dateactive',
-                        'CD_ticked',
-                        'CD_date', 'CD_hideuntildate', 'CD_recurring', 'CD_recurrence', 'CD_recurrencetype',
-                        'CD_modifieddate', 'CD_link', 'CD_note'
-                    ]
+                        'CD_date', 'CD_hideuntildate', 'CD_recurring', 'CD_recurrence',
+                        'CD_recurrencetype', 'CD_modifieddate', 'CD_link', 'CD_note'
+                    ],
+                    resultsLimit: 100
                 };
 
-                const response = await privateDB.fetchRecordZoneChanges(changesOptions);
+                const result = await privateDB.performQuery(query, { zoneID: ZONE_ID });
 
-                if (response.hasErrors) {
-                    const tokenError = response.errors.find((e: any) => e.ckErrorCode === 'CHANGE_TOKEN_EXPIRED');
-                    if (tokenError) {
-                        console.warn('[Cache] ⚠️ Work token expired. Resetting...');
-                        setSyncToken(null);
-                        localStorage.removeItem(LOCALSTORAGE_SYNC_TOKEN_KEY);
-                        // Should we force a full refresh? The next loop will fetch with null token.
-                        return;
-                    }
-                    throw new Error(response.errors[0].message);
-                }
+                // Always advance the timestamp so we don't re-fetch the same records
+                lastSyncTimeRef.current = Date.now();
 
-                const zoneChanges = response.zones[0];
-                const changedRecords = zoneChanges.records;
-                const deletedRecordIDs = zoneChanges.deleted;
-                const newSyncToken = zoneChanges.newServerChangeToken;
-
-                if (changedRecords.length === 0 && deletedRecordIDs.length === 0) {
-                    // console.log('[Cache] ✅ No changes.'); // Reduce noise
-                    if (newSyncToken && newSyncToken !== syncToken) {
-                        setSyncToken(newSyncToken);
-                        localStorage.setItem(LOCALSTORAGE_SYNC_TOKEN_KEY, newSyncToken);
-                    }
-                    setLastCacheRefresh(now);
+                if (result.hasErrors) {
+                    console.error('[Sync] Query error:', result.errors?.[0]);
                     return;
                 }
 
-                console.log(`[Cache] ⚡️ Delta: ${changedRecords.length} updated, ${deletedRecordIDs.length} deleted.`);
+                const changed: TaskRecord[] = result.records as TaskRecord[];
 
-                // Update Cache via helper
+                if (changed.length === 0) return; // Silent when nothing changed
+
+                console.log(`[Sync] ⚡️ ${changed.length} updated task${changed.length > 1 ? 's' : ''}:`);
+                changed.forEach(r => {
+                    console.log(`  ↳ ${r.fields?.CD_name?.value ?? r.recordName}`);
+                });
+
                 updateTaskCache(prev => {
                     const next = { ...prev };
-
-                    // 1. Process Updates
-                    changedRecords.forEach((record: any) => {
-                        if (record.recordType === 'CD_Task') {
-                            next[record.recordName] = record as TaskRecord;
+                    changed.forEach(record => {
+                        // Only include active (non-completed) tasks
+                        if (!record.fields?.CD_completed || record.fields.CD_completed.value !== 1) {
+                            next[record.recordName] = record;
+                        } else {
+                            // Task was completed — remove from cache
+                            delete next[record.recordName];
                         }
                     });
-
-                    // 2. Process Deletes
-                    deletedRecordIDs.forEach((del: any) => {
-                        delete next[del.recordName];
-                    });
-
                     return next;
                 });
 
-                // Save new token
-                if (newSyncToken) {
-                    setSyncToken(newSyncToken);
-                    localStorage.setItem(LOCALSTORAGE_SYNC_TOKEN_KEY, newSyncToken);
-                }
-
-                setLastCacheRefresh(now);
-
             } catch (err) {
-                console.error('[Cache] ❌ Sync error:', err);
+                console.error('[Sync] Unexpected error:', err);
             }
         };
 
-        const intervalId = setInterval(refreshCache, 15000);
-        return () => clearInterval(intervalId);
+        const intervalId = setInterval(fetchChanges, CACHE_REFRESH_INTERVAL);
+        const initialRun = setTimeout(fetchChanges, 1000);
+        return () => {
+            clearInterval(intervalId);
+            clearTimeout(initialRun);
+        };
 
-    }, [container, isAuthenticated, cacheInitialized, editingTaskId, editingId, syncToken, lastCacheRefresh]);
+    }, [container, isAuthenticated, cacheInitialized, editingTaskId, editingId]);
 
 
     // Drag and Drop Handlers
@@ -1454,7 +1401,7 @@ function ProjectsList() {
                     return saved ? { ...p, recordChangeTag: saved.recordChangeTag } : p;
                 }));
 
-                console.log('Project order updated successfully');
+
             } catch (err: any) {
                 console.error('Failed to reorder projects:', err);
                 alert('Failed to reorder projects: ' + err.message);
@@ -1499,7 +1446,7 @@ function ProjectsList() {
             const savedRecord = saveResult.records[0];
             upsertTaskInCache(savedRecord);
 
-            console.log('Task reassigned successfully');
+
 
         } catch (err: any) {
             console.error('Reassign error:', err);
@@ -1571,7 +1518,7 @@ function ProjectsList() {
             const savedRecord = saveResult.records[0];
             upsertTaskInCache(savedRecord);
 
-            console.log('Task moved to Next Actions successfully');
+
 
         } catch (err: any) {
             console.error('Move to Next Actions error:', err);
@@ -1643,7 +1590,7 @@ function ProjectsList() {
             const savedRecord = saveResult.records[0];
             upsertTaskInCache(savedRecord);
 
-            console.log('Task moved to Waiting for successfully');
+
 
         } catch (err: any) {
             console.error('Move to Waiting for error:', err);
@@ -1726,7 +1673,7 @@ function ProjectsList() {
             const savedRecord = saveResult.records[0];
             upsertTaskInCache(savedRecord);
 
-            console.log('Task moved to Deferred successfully');
+
 
         } catch (err: any) {
             console.error('Move to Deferred error:', err);
@@ -1803,7 +1750,7 @@ function ProjectsList() {
             const savedRecord = saveResult.records[0];
             upsertTaskInCache(savedRecord);
 
-            console.log('Task moved to Due successfully');
+
 
         } catch (err: any) {
             console.error('Move to Due error:', err);
@@ -1853,7 +1800,7 @@ function ProjectsList() {
             const savedRecord = saveResult.records[0];
             upsertTaskInCache(savedRecord);
 
-            console.log('Task moved to Someday successfully');
+
         } catch (err: any) {
             console.error('Move to Someday error:', err);
             alert('Failed to move task to Someday: ' + err.message);
@@ -1926,7 +1873,7 @@ function ProjectsList() {
             const targetSection = getTaskSection(targetTask);
 
             if (draggedSection !== targetSection) {
-                console.log(`[Drag] Cannot move task between sections (${draggedSection} -> ${targetSection})`);
+
                 return;
             }
         }
@@ -1976,7 +1923,7 @@ function ProjectsList() {
                     return saved ? { ...t, recordChangeTag: saved.recordChangeTag } : t;
                 }));
 
-                console.log('Reorder saved');
+
             } catch (err) {
                 console.error('Reorder failed:', err);
                 alert('Failed to save order');
@@ -1989,25 +1936,25 @@ function ProjectsList() {
     useEffect(() => {
         // Wait for cache to be initialized
         if (!cacheInitialized) {
-            console.log('[View Filter] ⏳ Waiting for cache initialization...');
+
             setLoadingTasks(true);
             return;
         }
 
         // PAUSE filtering if user is editing a task to prevent overwriting the task list
         if (editingTaskId || editingId) {
-            console.log('[View Filter] ⏸️ Filtering paused during editing');
+
             return;
         }
 
-        console.log('[View Filter] 🔍 Filtering cache for view:', viewMode, selectedProject?.fields.CD_name?.value || '');
+
 
         // Filter cache based on current view
         let filtered = Object.values(allTasksCache);
 
         // If in project mode but no project selected, show empty
         if (viewMode === 'project' && !selectedProject) {
-            console.log('[View Filter] No project selected, showing empty');
+
             setTasks([]);
             setLoadingTasks(false);
             return;
@@ -2137,7 +2084,7 @@ function ProjectsList() {
             });
         }
 
-        console.log(`[View Filter] ✅ Filtered ${filtered.length} tasks from cache`);
+
         setTasks(filtered);
         setLoadingTasks(false);
     }, [selectedProject, viewMode, cacheInitialized, allTasksCache, editingTaskId, editingId]);
@@ -2252,7 +2199,7 @@ function ProjectsList() {
                 const result = await privateDB.saveRecords([historyRecord, originalUpdate], { zoneID });
                 if (result.hasErrors) throw new Error(result.errors[0].message);
 
-                console.log('Recurring task processed: duplicated history and rescheduled original.');
+
 
                 // Update local change tag for original task
                 const savedOriginal = result.records.find((r: any) => r.recordName === task.recordName);
