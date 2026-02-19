@@ -1127,6 +1127,7 @@ function ProjectsList() {
             if (document.hidden) return;
 
             const since = lastSyncTimeRef.current;
+            console.log(`[Sync] 🔄 Checking for changes since ${new Date(since).toLocaleTimeString()}...`);
 
             try {
                 // ── Task changes ──────────────────────────────────────────────
@@ -1214,8 +1215,12 @@ function ProjectsList() {
                     }
                 }
 
-            } catch (err) {
-                console.error('[Sync] Unexpected error:', err);
+            } catch (err: any) {
+                if (err?._ckErrorCode === 'NETWORK_ERROR') {
+                    console.warn('[Sync] Network blip — will retry next tick');
+                } else {
+                    console.error('[Sync] Unexpected error:', err);
+                }
             }
         };
 

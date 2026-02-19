@@ -64,6 +64,10 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     onEditClick
 }) => {
 
+    // Track whether the user cancelled editing (Escape / ✗ button)
+    // so onBlur doesn't trigger a save when cancelling.
+    const cancelledRef = React.useRef(false);
+
     // Find associated tags
     const taskTags = taskTagMap[task.recordName]?.map(tagId => tags.find(t => t.recordName === tagId)).filter(Boolean) as TagRecord[] || [];
 
@@ -135,13 +139,14 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                             onChange={(e) => setEditTaskName(e.target.value)}
                             className="flex-1 text-sm rounded border-gray-300 px-2 py-1"
                             autoFocus
+                            onBlur={() => { if (!cancelledRef.current) onSave(task); cancelledRef.current = false; }}
                             onKeyDown={(e) => {
                                 if (e.key === 'Enter') onSave(task);
-                                if (e.key === 'Escape') onCancel();
+                                if (e.key === 'Escape') { cancelledRef.current = true; onCancel(); }
                             }}
                         />
-                        <button onClick={() => onSave(task)} className="text-green-600 p-1 hover:bg-green-50 rounded"><Check className="w-4 h-4" /></button>
-                        <button onClick={() => onCancel()} className="text-red-600 p-1 hover:bg-red-50 rounded"><X className="w-4 h-4" /></button>
+                        <button onMouseDown={(e) => e.preventDefault()} onClick={() => onSave(task)} className="text-green-600 p-1 hover:bg-green-50 rounded"><Check className="w-4 h-4" /></button>
+                        <button onMouseDown={(e) => { e.preventDefault(); cancelledRef.current = true; }} onClick={() => onCancel()} className="text-red-600 p-1 hover:bg-red-50 rounded"><X className="w-4 h-4" /></button>
                     </div>
                 ) : (
                     <div className="flex flex-col w-full relative cursor-pointer">

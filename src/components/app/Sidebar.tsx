@@ -243,16 +243,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         }}
                         onDrop={(e) => onDrop(e, { recordName: 'inbox-pseudo-project', recordType: 'CD_Project', fields: { CD_name: { value: 'Inbox' }, CD_id: { value: 'inbox' } } })}
                         className={`group flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${viewMode === 'inbox'
-                            ? 'bg-blue-50 text-blue-700'
+                            ? 'bg-gray-100 text-gray-900'
                             : dragOverProjectId === 'inbox-pseudo-project'
-                                ? 'bg-blue-100 ring-2 ring-blue-300 ring-inset'
+                                ? 'bg-gray-200 ring-2 ring-gray-400 ring-inset'
                                 : 'hover:bg-gray-100 text-gray-700'
                             }`}
                     >
-                        <Inbox className="w-5 h-5 text-blue-500" />
+                        <Inbox className="w-5 h-5 text-gray-800" />
                         <span className={`font-medium flex-1 ${isHighlightList('inbox') ? 'text-indigo-600 font-semibold' : ''}`}>Inbox</span>
                         {counts?.inbox ? (
-                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${isHighlightList('inbox') ? 'bg-indigo-100 text-indigo-700' : 'bg-blue-100 text-blue-600'}`}>
+                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${isHighlightList('inbox') ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-200 text-gray-700'}`}>
                                 {counts.inbox}
                             </span>
                         ) : null}
