@@ -77,12 +77,6 @@ function ProjectsList() {
     // ============ TASK CACHE SYSTEM ============
     // Global cache for all active (non-completed) tasks
     const [allTasksCache, setAllTasksCache] = useState<Record<string, TaskRecord>>({});
-    // Sync Token for Differential Sync
-    const [syncToken, setSyncToken] = useState<string | null>(null);
-    // Ref mirrors syncToken so the interval callback always reads the latest value
-    // without needing syncToken in the useEffect dependency array (which would cause
-    // the interval to be torn down and recreated on every sync, preventing it from firing).
-    const syncTokenRef = useRef<string | null>(null);
 
     // Calculate Counts for Sidebar
     const sidebarCounts = useMemo(() => {
@@ -230,7 +224,6 @@ function ProjectsList() {
     const CACHE_REFRESH_INTERVAL = 15000; // 15 seconds
     const LOCALSTORAGE_CACHE_KEY = 'next-idea-task-cache';
     const LOCALSTORAGE_TIMESTAMP_KEY = 'next-idea-cache-timestamp';
-    const LOCALSTORAGE_SYNC_TOKEN_KEY = 'next-idea-sync-token';
 
     // Helper: Update cache and localStorage
     const updateTaskCache = (updater: (prev: Record<string, TaskRecord>) => Record<string, TaskRecord>) => {
@@ -976,11 +969,6 @@ function ProjectsList() {
                 localStorage.removeItem(LOCALSTORAGE_TIMESTAMP_KEY);
             }
 
-            // 1b. Load Sync Token
-            const savedToken = localStorage.getItem(LOCALSTORAGE_SYNC_TOKEN_KEY);
-            if (savedToken) {
-                setSyncToken(savedToken);
-            }
 
             // 2. Fetch all active tasks from CloudKit to populate/refresh cache
             try {
