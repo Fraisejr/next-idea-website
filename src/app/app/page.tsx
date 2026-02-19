@@ -267,6 +267,8 @@ function ProjectsList() {
     };
 
     const handleCancel = () => {
+        // If we were creating a new project, remove the unsaved placeholder
+        setProjects(prev => prev.filter(p => p.recordName !== 'new-project'));
         setEditingId(null);
         setEditName('');
     };
@@ -349,9 +351,20 @@ function ProjectsList() {
         setEditName('');
     };
 
-    // Create new project at top of list
+    // Create new project just below the Single Actions list (Shift+P)
     const handleCreateProjectAtTop = async () => {
         if (!container) return;
+
+        // Find Single Actions project (if any) — new project goes just after it
+        const singleActions = projects.find(p => p.fields.CD_singleactions?.value === 1);
+        const insertAfterOrder = singleActions?.fields.CD_order?.value ?? -1;
+
+        // Projects that need to shift down: non-singleactions projects whose order > insertAfterOrder
+        const projectsToShift = projects.filter(
+            p => p.fields.CD_singleactions?.value !== 1 && (p.fields.CD_order?.value ?? 0) > insertAfterOrder
+        );
+
+        const newOrder = insertAfterOrder + 1;
 
         const newProject: ProjectRecord = {
             recordName: 'new-project',
@@ -359,35 +372,41 @@ function ProjectsList() {
             fields: {
                 CD_name: { value: '' },
                 CD_id: { value: 'new-project' },
-                CD_order: { value: 0 },
+                CD_order: { value: newOrder },
                 CD_singleactions: { value: 0 },
                 CD_icon: { value: 'list.clipboard' },
                 CD_color: { value: 'blue' }
             }
         };
 
-        // Shift all existing projects down
-        const shiftedProjects = projects.map(p => ({
-            ...p,
-            fields: { ...p.fields, CD_order: { value: (p.fields.CD_order?.value || 0) + 1 } }
-        }));
+        // Shift affected projects up by 1
+        const shiftedProjects = projects.map(p =>
+            projectsToShift.some(ps => ps.recordName === p.recordName)
+                ? { ...p, fields: { ...p.fields, CD_order: { value: (p.fields.CD_order?.value || 0) + 1 } } }
+                : p
+        );
 
-        setProjects([newProject, ...shiftedProjects]);
+        // Insert new project and re-sort
+        const updatedProjects = [...shiftedProjects, newProject].sort((a, b) => {
+            const isSingleA = a.fields.CD_singleactions?.value === 1;
+            const isSingleB = b.fields.CD_singleactions?.value === 1;
+            if (isSingleA && !isSingleB) return -1;
+            if (!isSingleA && isSingleB) return 1;
+            return (a.fields.CD_order?.value ?? 0) - (b.fields.CD_order?.value ?? 0);
+        });
+
+        setProjects(updatedProjects);
         setEditingId('new-project');
         setEditName('');
 
-        // Persist shifts in background
+        // Persist order shifts in background
         try {
             const privateDB = container.privateCloudDatabase;
             const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
-
-            const recordsToUpdate = projects.map(p => ({
+            const recordsToUpdate = projectsToShift.map(p => ({
                 recordName: p.recordName,
-                fields: {
-                    CD_order: { value: (p.fields.CD_order?.value || 0) + 1 }
-                }
+                fields: { CD_order: { value: (p.fields.CD_order?.value || 0) + 1 } }
             }));
-
             if (recordsToUpdate.length > 0) {
                 await privateDB.saveRecords(recordsToUpdate, { zoneID });
             }
