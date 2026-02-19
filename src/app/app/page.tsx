@@ -1138,16 +1138,13 @@ function ProjectsList() {
         const fetchChanges = async () => {
             if (document.hidden) return;
 
-            const since = lastSyncTimeRef.current; // milliseconds — matches how CD_modifieddate is stored
+            const since = lastSyncTimeRef.current;
 
             try {
-                const query = {
+                // ── Task changes ──────────────────────────────────────────────
+                const taskQuery = {
                     recordType: 'CD_Task',
-                    filterBy: [{
-                        fieldName: 'CD_modifieddate',
-                        comparator: 'GREATER_THAN',
-                        fieldValue: { value: since }
-                    }],
+                    filterBy: [{ fieldName: 'CD_modifieddate', comparator: 'GREATER_THAN', fieldValue: { value: since } }],
                     desiredKeys: [
                         'CD_name', 'CD_id', 'CD_order', 'CD_project', 'CD_completed',
                         'CD_someday', 'CD_waitingfor', 'CD_dateactive',
@@ -1157,38 +1154,77 @@ function ProjectsList() {
                     resultsLimit: 100
                 };
 
-                const result = await privateDB.performQuery(query, { zoneID: ZONE_ID });
+                // ── Project changes ───────────────────────────────────────────
+                const projectQuery = {
+                    recordType: 'CD_Project',
+                    filterBy: [{ fieldName: 'CD_modifieddate', comparator: 'GREATER_THAN', fieldValue: { value: since } }],
+                    desiredKeys: ['CD_name', 'CD_id', 'CD_order', 'CD_completed', 'CD_singleactions', 'CD_focus', 'CD_icon', 'CD_color', 'CD_modifieddate'],
+                    resultsLimit: 100
+                };
 
-                // Always advance the timestamp so we don't re-fetch the same records
+                const [taskResult, projectResult] = await Promise.all([
+                    privateDB.performQuery(taskQuery, { zoneID: ZONE_ID }),
+                    privateDB.performQuery(projectQuery, { zoneID: ZONE_ID }),
+                ]);
+
+                // Advance timestamp after both queries complete
                 lastSyncTimeRef.current = Date.now();
 
-                if (result.hasErrors) {
-                    console.error('[Sync] Query error:', result.errors?.[0]);
-                    return;
+                // ── Process task changes ──────────────────────────────────────
+                if (taskResult.hasErrors) {
+                    console.error('[Sync] Task query error:', taskResult.errors?.[0]);
+                } else {
+                    const changed: TaskRecord[] = taskResult.records as TaskRecord[];
+                    if (changed.length > 0) {
+                        console.log(`[Sync] ⚡️ ${changed.length} updated task${changed.length > 1 ? 's' : ''}:`);
+                        changed.forEach(r => console.log(`  ↳ ${r.fields?.CD_name?.value ?? r.recordName}`));
+                        updateTaskCache(prev => {
+                            const next = { ...prev };
+                            changed.forEach(record => {
+                                if (!record.fields?.CD_completed || record.fields.CD_completed.value !== 1) {
+                                    next[record.recordName] = record;
+                                } else {
+                                    delete next[record.recordName];
+                                }
+                            });
+                            return next;
+                        });
+                    }
                 }
 
-                const changed: TaskRecord[] = result.records as TaskRecord[];
-
-                if (changed.length === 0) return; // Silent when nothing changed
-
-                console.log(`[Sync] ⚡️ ${changed.length} updated task${changed.length > 1 ? 's' : ''}:`);
-                changed.forEach(r => {
-                    console.log(`  ↳ ${r.fields?.CD_name?.value ?? r.recordName}`);
-                });
-
-                updateTaskCache(prev => {
-                    const next = { ...prev };
-                    changed.forEach(record => {
-                        // Only include active (non-completed) tasks
-                        if (!record.fields?.CD_completed || record.fields.CD_completed.value !== 1) {
-                            next[record.recordName] = record;
-                        } else {
-                            // Task was completed — remove from cache
-                            delete next[record.recordName];
-                        }
-                    });
-                    return next;
-                });
+                // ── Process project changes ───────────────────────────────────
+                if (projectResult.hasErrors) {
+                    console.error('[Sync] Project query error:', projectResult.errors?.[0]);
+                } else {
+                    const changedProjects: ProjectRecord[] = projectResult.records as ProjectRecord[];
+                    if (changedProjects.length > 0) {
+                        console.log(`[Sync] 📁 ${changedProjects.length} updated project${changedProjects.length > 1 ? 's' : ''}:`);
+                        changedProjects.forEach(r => console.log(`  ↳ ${r.fields?.CD_name?.value ?? r.recordName}`));
+                        setProjects(prev => {
+                            const next = [...prev];
+                            changedProjects.forEach(record => {
+                                const idx = next.findIndex(p => p.recordName === record.recordName);
+                                const isCompleted = record.fields?.CD_completed?.value === 1;
+                                if (isCompleted) {
+                                    if (idx !== -1) next.splice(idx, 1);
+                                } else if (idx !== -1) {
+                                    next[idx] = record;
+                                } else {
+                                    next.push(record);
+                                }
+                            });
+                            // Re-sort: Single Actions list first, then by CD_order
+                            next.sort((a, b) => {
+                                const isSingleA = a.fields.CD_singleactions?.value === 1;
+                                const isSingleB = b.fields.CD_singleactions?.value === 1;
+                                if (isSingleA && !isSingleB) return -1;
+                                if (!isSingleA && isSingleB) return 1;
+                                return (a.fields.CD_order?.value ?? 0) - (b.fields.CD_order?.value ?? 0);
+                            });
+                            return next;
+                        });
+                    }
+                }
 
             } catch (err) {
                 console.error('[Sync] Unexpected error:', err);
