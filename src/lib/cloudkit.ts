@@ -1,18 +1,10 @@
 export const CLOUDKIT_CONTAINER_ID = 'iCloud.Transformia.Next-Idea';
 
-// ── Switch here to change environment ────────────────────────────────────────
-// Flip the comment between DEV and PROD to switch databases.
+// Credentials live in .env.local (gitignored) — never committed.
+// To switch environments, edit .env.local and toggle the DEV/PROD block there.
+export const CLOUDKIT_API_TOKEN = process.env.NEXT_PUBLIC_CLOUDKIT_API_TOKEN!;
+export const CLOUDKIT_ENV = process.env.NEXT_PUBLIC_CLOUDKIT_ENV ?? 'development';
 
-// DEV — local testing (no domain whitelisting required)
-// const CLOUDKIT_API_TOKEN = 'REDACTED_DEV_TOKEN';
-// const CLOUDKIT_ENV      = 'development';
-
-// PROD — deployed site (domain must be whitelisted in CloudKit Dashboard)
-const CLOUDKIT_API_TOKEN = 'REDACTED_PROD_TOKEN';
-const CLOUDKIT_ENV = 'production';
-
-// ─────────────────────────────────────────────────────────────────────────────
-export { CLOUDKIT_API_TOKEN, CLOUDKIT_ENV };
 
 // Type definition based on user schema
 export interface ProjectRecord {
