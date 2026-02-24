@@ -9,8 +9,7 @@ import { TaskItem } from '@/components/app/TaskItem';
 import { Sidebar } from '@/components/app/Sidebar';
 import { TaskSection } from '@/components/app/TaskSection';
 import { Loader2, ListTodo, CheckCircle2, Pencil, Check, X, ClipboardList, Plus, Clock, RotateCcw, Calendar, Hourglass, Repeat, Moon, ChevronRight, Zap, Inbox, Keyboard, CalendarClock, CalendarDays, Tag } from 'lucide-react';
-
-// Helper to categorize tasks
+import { useAutoAnimate } from '@formkit/auto-animate/react';
 const getTaskSection = (task: TaskRecord) => {
     if (task.fields.CD_completed?.value === 1) return 'completed';
     if (task.fields.CD_waitingfor?.value === 1) return 'waitingFor';
@@ -64,6 +63,8 @@ function ProjectsList() {
 
     // Search State
     const [searchQuery, setSearchQuery] = useState('');
+
+    const [animationParent] = useAutoAnimate();
 
     // Sync link/note input when selected task changes
     useEffect(() => {
@@ -2397,6 +2398,100 @@ function ProjectsList() {
         setSelectedTaskDetails(task);
     };
 
+    const handleMoveToTop = async (task: TaskRecord) => {
+        if (!container) return;
+        const privateDB = container.privateCloudDatabase;
+        const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
+
+        const uncompleted = visibleTasks.filter(t => t.fields.CD_completed?.value !== 1);
+        if (uncompleted.length === 0) return;
+        const minOrder = Math.min(...uncompleted.map(t => t.fields.CD_order?.value ?? 0));
+        const newOrder = minOrder - 1000;
+
+        setTasks(prev => {
+            const nextTasks = prev.map(t =>
+                t.recordName === task.recordName
+                    ? { ...t, fields: { ...t.fields, CD_order: { value: newOrder }, CD_modifieddate: { value: Date.now() } } }
+                    : t
+            );
+            return nextTasks.sort((a, b) => (a.fields.CD_order?.value ?? 0) - (b.fields.CD_order?.value ?? 0));
+        });
+
+        try {
+            const fetchResult = await privateDB.fetchRecords([task.recordName], { zoneID });
+            if (fetchResult.hasErrors) throw new Error(fetchResult.errors[0].message);
+            const latestRecord = fetchResult.records[0];
+
+            const recordToSave = {
+                recordName: latestRecord.recordName,
+                recordChangeTag: latestRecord.recordChangeTag,
+                fields: {
+                    CD_order: { value: newOrder },
+                    CD_modifieddate: { value: Date.now() }
+                }
+            };
+
+            const result = await privateDB.saveRecords([recordToSave], { zoneID });
+            if (result.hasErrors) throw new Error(result.errors[0].message);
+
+            const savedRecord = result.records[0];
+            setTasks(prev => prev.map(t =>
+                t.recordName === savedRecord.recordName
+                    ? { ...t, recordChangeTag: savedRecord.recordChangeTag }
+                    : t
+            ));
+        } catch (err) {
+            console.error('Failed to move task to top', err);
+        }
+    };
+
+    const handleMoveToBottom = async (task: TaskRecord) => {
+        if (!container) return;
+        const privateDB = container.privateCloudDatabase;
+        const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
+
+        const uncompleted = visibleTasks.filter(t => t.fields.CD_completed?.value !== 1);
+        if (uncompleted.length === 0) return;
+        const maxOrder = Math.max(...uncompleted.map(t => t.fields.CD_order?.value ?? 0));
+        const newOrder = maxOrder + 1000;
+
+        setTasks(prev => {
+            const nextTasks = prev.map(t =>
+                t.recordName === task.recordName
+                    ? { ...t, fields: { ...t.fields, CD_order: { value: newOrder }, CD_modifieddate: { value: Date.now() } } }
+                    : t
+            );
+            return nextTasks.sort((a, b) => (a.fields.CD_order?.value ?? 0) - (b.fields.CD_order?.value ?? 0));
+        });
+
+        try {
+            const fetchResult = await privateDB.fetchRecords([task.recordName], { zoneID });
+            if (fetchResult.hasErrors) throw new Error(fetchResult.errors[0].message);
+            const latestRecord = fetchResult.records[0];
+
+            const recordToSave = {
+                recordName: latestRecord.recordName,
+                recordChangeTag: latestRecord.recordChangeTag,
+                fields: {
+                    CD_order: { value: newOrder },
+                    CD_modifieddate: { value: Date.now() }
+                }
+            };
+
+            const result = await privateDB.saveRecords([recordToSave], { zoneID });
+            if (result.hasErrors) throw new Error(result.errors[0].message);
+
+            const savedRecord = result.records[0];
+            setTasks(prev => prev.map(t =>
+                t.recordName === savedRecord.recordName
+                    ? { ...t, recordChangeTag: savedRecord.recordChangeTag }
+                    : t
+            ));
+        } catch (err) {
+            console.error('Failed to move task to bottom', err);
+        }
+    };
+
     const renderTaskList = (tasksToRender: TaskRecord[]) => {
         // Filter passed tasks based on search
         const filteredTasks = tasksToRender.filter(task => {
@@ -2407,7 +2502,7 @@ function ProjectsList() {
         });
 
         return (
-            <>
+            <div ref={animationParent}>
                 {filteredTasks.map(task => (
                     <TaskItem
                         key={task.recordName}
@@ -2432,9 +2527,11 @@ function ProjectsList() {
                         onCancel={handleTaskCancel}
                         onInsertTask={handleInsertTask}
                         onEditClick={handleTaskEditClick}
+                        onMoveToTop={handleMoveToTop}
+                        onMoveToBottom={handleMoveToBottom}
                     />
                 ))}
-            </>
+            </div>
         );
     };
 

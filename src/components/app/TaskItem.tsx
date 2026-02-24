@@ -10,7 +10,9 @@ import {
     Repeat,
     Plus,
     Info,
-    ExternalLink
+    ExternalLink,
+    ArrowUpToLine,
+    ArrowDownToLine
 } from 'lucide-react';
 import React from 'react';
 
@@ -38,6 +40,8 @@ type TaskItemProps = {
     onCancel: () => void;
     onInsertTask: (task: TaskRecord) => void;
     onEditClick: (task: TaskRecord) => void;
+    onMoveToTop?: (task: TaskRecord) => void;
+    onMoveToBottom?: (task: TaskRecord) => void;
 };
 
 export const TaskItem: React.FC<TaskItemProps> = ({
@@ -61,7 +65,9 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     onSave,
     onCancel,
     onInsertTask,
-    onEditClick
+    onEditClick,
+    onMoveToTop,
+    onMoveToBottom
 }) => {
 
     // Track whether the user cancelled editing (Escape / ✗ button)
@@ -178,6 +184,26 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                                     >
                                         <Plus className="w-4 h-4" />
                                     </button>
+
+                                    {onMoveToTop && (
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); onMoveToTop(task); }}
+                                            className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg ml-0.5 cursor-pointer"
+                                            title="Move to Top"
+                                        >
+                                            <ArrowUpToLine className="w-4 h-4" />
+                                        </button>
+                                    )}
+
+                                    {onMoveToBottom && (
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); onMoveToBottom(task); }}
+                                            className="p-1.5 text-orange-600 bg-orange-50 hover:bg-orange-100 rounded-lg ml-0.5 cursor-pointer"
+                                            title="Move to Bottom"
+                                        >
+                                            <ArrowDownToLine className="w-4 h-4" />
+                                        </button>
+                                    )}
 
                                     <button
                                         onClick={(e) => { e.stopPropagation(); onTaskClick(task); }}
