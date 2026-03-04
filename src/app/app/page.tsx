@@ -792,18 +792,11 @@ function ProjectsList() {
                 ...(viewMode === 'waiting' ? { CD_waitingfor: { value: 1 }, CD_someday: { value: 0 } } : {}),
                 ...(viewMode === 'deferred' ? { CD_date: { value: new Date(new Date().setHours(24, 0, 0, 0)).getTime() }, CD_dateactive: { value: 1 }, CD_hideuntildate: { value: 1 }, CD_someday: { value: 0 } } : {}),
                 CD_completed: { value: 0 },
-                CD_order: { value: 0 } // Top of the list
+                CD_order: { value: tasks.filter(t => t.fields.CD_completed?.value !== 1).length > 0 ? Math.min(...tasks.filter(t => t.fields.CD_completed?.value !== 1).map(t => t.fields.CD_order?.value || 0)) - 1 : 0 }
             }
         };
 
-        // Shift all existing tasks down
-        setTasks(prev => {
-            const shifted = prev.map(t => ({
-                ...t,
-                fields: { ...t.fields, CD_order: { value: (t.fields.CD_order?.value || 0) + 1 } }
-            }));
-            return [newTask, ...shifted];
-        });
+        setTasks(prev => [...prev, newTask].sort((a, b) => (a.fields.CD_order?.value ?? 0) - (b.fields.CD_order?.value ?? 0)));
         setEditingTaskId('new-task');
         setEditTaskName('');
     };
@@ -1961,9 +1954,33 @@ function ProjectsList() {
         if (tasksToSave.length > 0) {
             try {
                 const privateDB = container.privateCloudDatabase;
-                const result = await privateDB.saveRecords(tasksToSave, { zoneID });
+                const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
 
-                if (result.hasErrors) throw new Error(result.errors[0].message);
+                // CRITICAL FIX: Fetch latest versions of tasks before saving to avoid CAS Op-Lock failures
+                const recordNamesToFetch = tasksToSave.map(t => t.recordName);
+                const fetchResult = await privateDB.fetchRecords(recordNamesToFetch, { zoneID });
+
+                if (fetchResult.hasErrors) throw new Error(fetchResult.errors[0].message);
+
+                const fetchedRecordsMap = new Map();
+                fetchResult.records.forEach((r: any) => fetchedRecordsMap.set(r.recordName, r));
+
+                const freshTasksToSave = tasksToSave.map(t => {
+                    const freshRecord = fetchedRecordsMap.get(t.recordName);
+                    if (!freshRecord) return t;
+
+                    return {
+                        ...t,
+                        recordChangeTag: freshRecord.recordChangeTag
+                    };
+                });
+
+                const result = await privateDB.saveRecords(freshTasksToSave, { zoneID });
+
+                if (result.hasErrors) {
+                    // It can still fail if modified right between fetch and save
+                    throw new Error(result.errors[0].message);
+                }
 
                 // Update local state with new change tags to prevent conflict on next save
                 const savedRecords = result.records;
@@ -1972,10 +1989,9 @@ function ProjectsList() {
                     return saved ? { ...t, recordChangeTag: saved.recordChangeTag } : t;
                 }));
 
-
-            } catch (err) {
+            } catch (err: any) {
                 console.error('Reorder failed:', err);
-                alert('Failed to save order');
+                alert('Failed to save task order: ' + err.message);
             }
         }
     };
@@ -2758,7 +2774,7 @@ function ProjectsList() {
                         </h1>
                         {(viewMode === 'project' && selectedProject || viewMode === 'inbox' || viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due' || viewMode === 'waiting' || viewMode === 'deferred') && (
                             <button
-                                onClick={handleCreateTask}
+                                onClick={handleCreateTaskAtTop}
                                 className="p-1 rounded-full text-gray-400 hover:bg-blue-50 hover:text-blue-600 transition-colors"
                                 title="New Task (Cmd+N)"
                             >
