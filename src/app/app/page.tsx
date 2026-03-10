@@ -593,7 +593,7 @@ function ProjectsList() {
     };
 
     const handleCreateTask = () => {
-        if ((!selectedProject && viewMode !== 'inbox' && viewMode !== 'next_actions' && viewMode !== 'someday' && viewMode !== 'due' && viewMode !== 'waiting' && viewMode !== 'deferred') || editingTaskId) return; // Don't start if already editing
+        if ((!selectedProject && viewMode !== 'inbox' && viewMode !== 'next_actions' && viewMode !== 'someday' && viewMode !== 'due' && viewMode !== 'waiting' && viewMode !== 'deferred' && viewMode !== 'all_tasks') || editingTaskId) return; // Don't start if already editing
 
         // Find Single Actions project for Next Actions view or Someday view
         const singleActionsProject = (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due' || viewMode === 'waiting' || viewMode === 'deferred')
@@ -607,8 +607,8 @@ function ProjectsList() {
             fields: {
                 CD_name: { value: '' },
                 CD_id: { value: 'new-task' },
-                // Inbox: omit project. Next Actions/Someday: use Single Actions project. Project mode: use selectedProject.
-                ...(viewMode === 'inbox' ? {}
+                // all_tasks / Inbox: omit project. Next Actions/Someday: use Single Actions project. Project mode: use selectedProject.
+                ...(viewMode === 'inbox' || viewMode === 'all_tasks' ? {}
                     : (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due' || viewMode === 'waiting' || viewMode === 'deferred')
                         ? (singleActionsProject?.recordName ? { CD_project: { value: singleActionsProject.recordName } } : {})
                         : (selectedProject?.recordName ? { CD_project: { value: selectedProject.recordName } } : {})),
@@ -627,7 +627,7 @@ function ProjectsList() {
     };
 
     const handleInsertTask = async (afterTask: TaskRecord) => {
-        if ((!selectedProject && viewMode !== 'inbox' && viewMode !== 'next_actions' && viewMode !== 'someday' && viewMode !== 'due' && viewMode !== 'waiting' && viewMode !== 'deferred') || editingTaskId || !container) return;
+        if ((!selectedProject && viewMode !== 'inbox' && viewMode !== 'next_actions' && viewMode !== 'someday' && viewMode !== 'due' && viewMode !== 'waiting' && viewMode !== 'deferred' && viewMode !== 'all_tasks') || editingTaskId || !container) return;
 
         // Find index of afterTask
         const index = tasks.findIndex(t => t.recordName === afterTask.recordName);
@@ -676,8 +676,8 @@ function ProjectsList() {
             fields: {
                 CD_name: { value: '' },
                 CD_id: { value: crypto.randomUUID() }, // Client-side UUID for new task
-                // Inbox: omit project. Next Actions/Someday: use Single Actions project. Project mode: use selectedProject.
-                ...(viewMode === 'inbox' ? {}
+                // Inbox / all_tasks: omit project. Next Actions/Someday: use Single Actions project. Project mode: use selectedProject.
+                ...(viewMode === 'inbox' || viewMode === 'all_tasks' ? {}
                     : (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due' || viewMode === 'waiting' || viewMode === 'deferred')
                         ? (singleActionsProject?.recordName ? { CD_project: { value: singleActionsProject.recordName } } : {})
                         : (selectedProject?.recordName ? { CD_project: { value: selectedProject.recordName } } : {})),
@@ -783,7 +783,7 @@ function ProjectsList() {
 
     // Create task at top
     const handleCreateTaskAtTop = () => {
-        if ((!selectedProject && viewMode !== 'inbox' && viewMode !== 'next_actions' && viewMode !== 'someday' && viewMode !== 'due' && viewMode !== 'waiting' && viewMode !== 'deferred') || editingTaskId) return;
+        if ((!selectedProject && viewMode !== 'inbox' && viewMode !== 'next_actions' && viewMode !== 'someday' && viewMode !== 'due' && viewMode !== 'waiting' && viewMode !== 'deferred' && viewMode !== 'all_tasks') || editingTaskId) return;
 
         const singleActionsProject = (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due' || viewMode === 'waiting' || viewMode === 'deferred')
             ? projects.find(p => p.fields.CD_singleactions?.value === 1)
@@ -796,7 +796,7 @@ function ProjectsList() {
             fields: {
                 CD_name: { value: '' },
                 CD_id: { value: 'new-task' },
-                ...(viewMode === 'inbox' ? {}
+                ...(viewMode === 'inbox' || viewMode === 'all_tasks' ? {}
                     : (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due' || viewMode === 'waiting' || viewMode === 'deferred')
                         ? (singleActionsProject?.recordName ? { CD_project: { value: singleActionsProject.recordName } } : {})
                         : (selectedProject?.recordName ? { CD_project: { value: selectedProject.recordName } } : {})),
@@ -820,28 +820,28 @@ function ProjectsList() {
             // Ignore if typing in input/textarea
             if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
 
-            // N - Create task at bottom
+            // N - Create task at top
             if (e.key === 'n' && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
-                e.preventDefault();
-                handleCreateTask();
-            }
-
-            // Shift+N - Create task at top
-            if (e.key === 'N' && e.shiftKey && !e.metaKey && !e.ctrlKey) {
                 e.preventDefault();
                 handleCreateTaskAtTop();
             }
 
-            // P - Create project at bottom
-            if (e.key === 'p' && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
+            // Shift+N - Create task at bottom
+            if (e.key === 'N' && e.shiftKey && !e.metaKey && !e.ctrlKey) {
                 e.preventDefault();
-                handleCreateProject();
+                handleCreateTask();
             }
 
-            // Shift+P - Create project at top
-            if (e.key === 'P' && e.shiftKey && !e.metaKey && !e.ctrlKey) {
+            // P - Create project at top
+            if (e.key === 'p' && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
                 e.preventDefault();
                 handleCreateProjectAtTop();
+            }
+
+            // Shift+P - Create project at bottom
+            if (e.key === 'P' && e.shiftKey && !e.metaKey && !e.ctrlKey) {
+                e.preventDefault();
+                handleCreateProject();
             }
 
             // ? - Show keyboard shortcuts
@@ -3040,11 +3040,11 @@ function ProjectsList() {
                                     </h3>
                                     <div className="space-y-2">
                                         <div className="flex justify-between items-center py-2 px-3 bg-gray-50 rounded-lg">
-                                            <span className="text-gray-700">Create task at the bottom</span>
+                                            <span className="text-gray-700">Create task at the top</span>
                                             <kbd className="px-3 py-1 bg-white border border-gray-300 rounded shadow-sm font-mono text-sm">N</kbd>
                                         </div>
                                         <div className="flex justify-between items-center py-2 px-3 bg-gray-50 rounded-lg">
-                                            <span className="text-gray-700">Create task at the top</span>
+                                            <span className="text-gray-700">Create task at the bottom</span>
                                             <kbd className="px-3 py-1 bg-white border border-gray-300 rounded shadow-sm font-mono text-sm">Shift + N</kbd>
                                         </div>
                                     </div>
@@ -3058,11 +3058,11 @@ function ProjectsList() {
                                     </h3>
                                     <div className="space-y-2">
                                         <div className="flex justify-between items-center py-2 px-3 bg-gray-50 rounded-lg">
-                                            <span className="text-gray-700">Create project at the bottom</span>
+                                            <span className="text-gray-700">Create project at the top</span>
                                             <kbd className="px-3 py-1 bg-white border border-gray-300 rounded shadow-sm font-mono text-sm">P</kbd>
                                         </div>
                                         <div className="flex justify-between items-center py-2 px-3 bg-gray-50 rounded-lg">
-                                            <span className="text-gray-700">Create project at the top</span>
+                                            <span className="text-gray-700">Create project at the bottom</span>
                                             <kbd className="px-3 py-1 bg-white border border-gray-300 rounded shadow-sm font-mono text-sm">Shift + P</kbd>
                                         </div>
                                     </div>
