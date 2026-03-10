@@ -1560,6 +1560,15 @@ function ProjectsList() {
                 updates.CD_hideuntildate = { value: 0 };
             }
 
+            // Put at top of Next Actions list
+            const nextActionsTasks = Object.values(allTasksCache).filter(t => {
+                if (t.fields.CD_completed?.value === 1) return false;
+                const section = getTaskSection(t);
+                return section === 'nextActions' || section === 'due';
+            });
+            const minOrder = nextActionsTasks.length > 0 ? Math.min(...nextActionsTasks.map(t => t.fields.CD_order?.value ?? 0)) : 0;
+            updates.CD_order = { value: minOrder - 1 };
+
             updates.CD_modifieddate = { value: Date.now() };
 
             // Apply updates to task record
@@ -1896,6 +1905,12 @@ function ProjectsList() {
                 const singleActions = projects.find(p => p.fields.CD_singleactions?.value === 1);
                 if (singleActions) updates.CD_project = { value: singleActions.recordName };
             }
+
+            // Put at top of Someday list
+            const somedayTasks = Object.values(allTasksCache).filter(t => t.fields.CD_someday?.value === 1 && t.fields.CD_completed?.value !== 1);
+            const minOrder = somedayTasks.length > 0 ? Math.min(...somedayTasks.map(t => t.fields.CD_order?.value ?? 0)) : 0;
+            updates.CD_order = { value: minOrder - 1 };
+
             updates.CD_modifieddate = { value: Date.now() };
 
             Object.assign(taskRecord.fields, updates);
