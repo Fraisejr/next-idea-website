@@ -1990,7 +1990,7 @@ function ProjectsList() {
         }
 
         // Enforce Section Constraints (Project View)
-        if (viewMode === 'project' && selectedProject) {
+        if ((viewMode === 'project' && selectedProject) || viewMode === 'all_tasks') {
             const draggedTask = tasks[oldIndex];
             const draggedSection = getTaskSection(draggedTask);
             const targetSection = getTaskSection(targetTask);
@@ -2923,39 +2923,69 @@ function ProjectsList() {
                             {(viewMode === 'project' || viewMode === 'all_tasks') && sections ? (
                                 <>
                                     {viewMode === 'all_tasks' && sections.inbox.length > 0 && (
-                                        <TaskSection title="Inbox" count={sections.inbox.length} colorClass="text-gray-700">
-                                            {renderTaskList(sections.inbox)}
-                                        </TaskSection>
+                                        <div
+                                            onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+                                            onDrop={handleDropInbox}
+                                        >
+                                            <TaskSection title="Inbox" count={sections.inbox.length} colorClass="text-gray-700">
+                                                {renderTaskList(sections.inbox)}
+                                            </TaskSection>
+                                        </div>
                                     )}
 
                                     {sections.due.length > 0 && (
-                                        <TaskSection title="Due / Overdue" count={sections.due.length} colorClass="text-green-700">
-                                            {renderTaskList(sections.due)}
-                                        </TaskSection>
+                                        <div
+                                            onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+                                            onDrop={handleDropDue}
+                                        >
+                                            <TaskSection title="Due / Overdue" count={sections.due.length} colorClass="text-green-700">
+                                                {renderTaskList(sections.due)}
+                                            </TaskSection>
+                                        </div>
                                     )}
 
                                     {sections.nextActions.length > 0 && (
-                                        <TaskSection title="Next Actions" count={sections.nextActions.length} colorClass="text-blue-700">
-                                            {renderTaskList(sections.nextActions)}
-                                        </TaskSection>
+                                        <div
+                                            onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+                                            onDrop={handleDropNextActions}
+                                        >
+                                            <TaskSection title="Next Actions" count={sections.nextActions.length} colorClass="text-blue-700">
+                                                {renderTaskList(sections.nextActions)}
+                                            </TaskSection>
+                                        </div>
                                     )}
 
                                     {sections.waitingFor.length > 0 && (
-                                        <TaskSection title="Waiting For" count={sections.waitingFor.length} colorClass="text-orange-500">
-                                            {renderTaskList(sections.waitingFor)}
-                                        </TaskSection>
+                                        <div
+                                            onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+                                            onDrop={handleDropWaiting}
+                                        >
+                                            <TaskSection title="Waiting For" count={sections.waitingFor.length} colorClass="text-orange-500">
+                                                {renderTaskList(sections.waitingFor)}
+                                            </TaskSection>
+                                        </div>
                                     )}
 
                                     {sections.deferred.length > 0 && (
-                                        <TaskSection title="Deferred" count={sections.deferred.length} colorClass="text-gray-600">
-                                            {renderTaskList(sections.deferred)}
-                                        </TaskSection>
+                                        <div
+                                            onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+                                            onDrop={handleDropDeferred}
+                                        >
+                                            <TaskSection title="Deferred" count={sections.deferred.length} colorClass="text-gray-600">
+                                                {renderTaskList(sections.deferred)}
+                                            </TaskSection>
+                                        </div>
                                     )}
 
                                     {sections.someday.length > 0 && (
-                                        <TaskSection title="Someday / Maybe" count={sections.someday.length} colorClass="text-[#92400e]">
-                                            {renderTaskList(sections.someday)}
-                                        </TaskSection>
+                                        <div
+                                            onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+                                            onDrop={handleDropSomeday}
+                                        >
+                                            <TaskSection title="Someday / Maybe" count={sections.someday.length} colorClass="text-[#92400e]">
+                                                {renderTaskList(sections.someday)}
+                                            </TaskSection>
+                                        </div>
                                     )}
                                 </>
                             ) : (
