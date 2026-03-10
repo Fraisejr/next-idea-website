@@ -64,7 +64,7 @@ function ProjectsList() {
     const [taskError, setTaskError] = useState<string | null>(null);
 
     // View Mode
-    const [viewMode, setViewMode] = useState<'project' | 'history' | 'inbox' | 'next_actions' | 'someday' | 'due' | 'waiting' | 'deferred'>('next_actions'); // Default to next_actions
+    const [viewMode, setViewMode] = useState<'project' | 'history' | 'inbox' | 'next_actions' | 'someday' | 'due' | 'waiting' | 'deferred' | 'all_tasks'>('next_actions'); // Default to next_actions
     const [completingTaskIds, setCompletingTaskIds] = useState<Set<string>>(new Set());
 
     // Details Panel State
@@ -101,6 +101,7 @@ function ProjectsList() {
             deferred: 0,
             someday: 0,
             history: 0,
+            allTasks: 0,
             projects: {} as Record<string, number>
         };
 
@@ -117,18 +118,12 @@ function ProjectsList() {
 
         Object.values(allTasksCache).forEach(task => {
             // Skip completed tasks for active counts, but count for history (if we want history count)
-            // History count usually implies "Completed Today" or similar, but here let's just count total completed?
-            // Actually users usually want to see "Completed Today" or just a link. 
-            // The sidebar item says "Completed Tasks", often users like a count of total completed or recent.
-            // For now, let's count ALL completed tasks in cache (which are fetched if they were active recently or specifically fetched)
-            // But wait, our cache only has ACTIVE tasks (filtered by CD_completed !== 1). 
-            // So history count will be 0 unless we change cache logic or specific fetch.
-            // Let's leave history count as 0 for now as cache doesn't have them.
-
             if (task.fields.CD_completed?.value === 1) {
-                // counts.history++; // Cache doesn't have completed tasks usually
                 return;
             }
+
+            // Count for All Tasks
+            counts.allTasks++;
 
             // Project Counts
             if (task.fields.CD_project?.value) {
@@ -1660,6 +1655,59 @@ function ProjectsList() {
         }
     };
 
+    const handleDropInbox = async (e: React.DragEvent) => {
+        e.preventDefault();
+        setDragOverProjectId(null);
+
+        const id = e.dataTransfer.getData('text/plain');
+        if (!id || !container) return;
+
+        // Optimistic update
+        setTasks(prev => prev.map(t => {
+            if (t.recordName === id) {
+                return {
+                    ...t,
+                    fields: {
+                        ...t.fields,
+                        CD_project: { value: '' }, // Remove project
+                        CD_waitingfor: { value: 0 },
+                        CD_someday: { value: 0 }
+                    }
+                };
+            }
+            return t;
+        }));
+
+        try {
+            const privateDB = container.privateCloudDatabase;
+            const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
+
+            const fetchResult = await privateDB.fetchRecords([id], { zoneID });
+            if (fetchResult.hasErrors) throw new Error(fetchResult.errors[0].message);
+            const taskRecord = fetchResult.records[0];
+
+            const updates: any = {
+                CD_project: { value: '' },
+                CD_waitingfor: { value: 0 },
+                CD_someday: { value: 0 },
+                CD_modifieddate: { value: Date.now() }
+            };
+
+            Object.assign(taskRecord.fields, updates);
+
+            const saveResult = await privateDB.saveRecords([taskRecord], { zoneID });
+            if (saveResult.hasErrors) throw new Error(saveResult.errors[0].message);
+
+            const savedRecord = saveResult.records[0];
+            upsertTaskInCache(savedRecord);
+
+        } catch (err: any) {
+            console.error('Move to Inbox error:', err);
+            alert('Failed to move task to Inbox: ' + err.message);
+            window.location.reload();
+        }
+    };
+
     const handleDropDeferred = async (e: React.DragEvent) => {
         e.preventDefault();
         setDragOverProjectId(null);
@@ -2363,7 +2411,7 @@ function ProjectsList() {
     // In 'history' mode: show tasks that ARE completed (and NOT uncompleted, though local state update handles that).
 
     const visibleTasks = tasks.filter(t => {
-        if (viewMode === 'project') {
+        if (viewMode === 'project' || viewMode === 'all_tasks') {
             return (t.fields.CD_completed?.value !== 1) || completingTaskIds.has(t.recordName);
         } else if (viewMode === 'inbox') {
             // Inbox: Show tasks with NO project (or empty string) AND not completed
@@ -2397,17 +2445,22 @@ function ProjectsList() {
     });
 
     const sections = useMemo(() => {
-        if (viewMode !== 'project') return null;
+        if (viewMode !== 'project' && viewMode !== 'all_tasks') return null;
 
         const due: TaskRecord[] = [];
         const nextActions: TaskRecord[] = [];
         const waitingFor: TaskRecord[] = [];
         const deferred: TaskRecord[] = [];
         const somedayMaybe: TaskRecord[] = [];
+        const inbox: TaskRecord[] = [];
 
         visibleTasks.forEach(t => {
             const section = getTaskSection(t);
-            if (section === 'due') {
+
+            if (viewMode === 'all_tasks' && section === 'inbox') {
+                inbox.push(t);
+            }
+            else if (section === 'due') {
                 due.push(t);
                 // ALSO add to Next Actions if it's not blocked (Waiting/Someday/Hidden)
                 // This allows users to see it in their main list flow as well
@@ -2423,13 +2476,13 @@ function ProjectsList() {
             else if (section === 'waitingFor') waitingFor.push(t);
             else if (section === 'somedayMaybe') somedayMaybe.push(t);
             else if (section === 'deferred') deferred.push(t);
-            else nextActions.push(t);
+            else nextActions.push(t); // Covers generic 'nextActions' return from getTaskSection
         });
 
         // Ensure tasks within due are sorted by date
         due.sort((a, b) => (a.fields.CD_date?.value || 0) - (b.fields.CD_date?.value || 0));
 
-        return { due, nextActions, waitingFor, deferred, someday: somedayMaybe };
+        return { due, nextActions, waitingFor, deferred, someday: somedayMaybe, inbox };
     }, [visibleTasks, viewMode]);
 
     // Details Side Panel Handlers
@@ -2772,6 +2825,7 @@ function ProjectsList() {
                 onDropWaiting={handleDropWaiting}
                 onDropDeferred={handleDropDeferred}
                 onDropSomeday={handleDropSomeday}
+                onDropInbox={handleDropInbox}
                 onShowShortcuts={(show) => setShowShortcuts(show)}
                 counts={sidebarCounts}
                 searchQuery={searchQuery}
@@ -2792,10 +2846,11 @@ function ProjectsList() {
                                             : viewMode === 'deferred' ? 'Deferred'
                                                 : viewMode === 'someday' ? 'Someday / Maybe'
                                                     : viewMode === 'due' ? 'Due and Overdue'
-                                                        : 'Completed Tasks'
+                                                        : viewMode === 'all_tasks' ? 'All tasks'
+                                                            : 'Completed Tasks'
                             }
                         </h1>
-                        {(viewMode === 'project' && selectedProject || viewMode === 'inbox' || viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due' || viewMode === 'waiting' || viewMode === 'deferred') && (
+                        {(viewMode === 'project' && selectedProject || viewMode === 'inbox' || viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due' || viewMode === 'waiting' || viewMode === 'deferred' || viewMode === 'all_tasks') && (
                             <button
                                 onClick={handleCreateTaskAtTop}
                                 className="p-1 rounded-full text-gray-400 hover:bg-blue-50 hover:text-blue-600 transition-colors"
@@ -2821,10 +2876,10 @@ function ProjectsList() {
                         </div>
                     ) : visibleTasks.length === 0 ? (
                         <div className="text-center py-20 bg-gray-50 rounded-2xl border border-dashed border-gray-200">
-                            {viewMode === 'project' ? (
+                            {viewMode === 'project' || viewMode === 'all_tasks' ? (
                                 <>
                                     <ListTodo className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-                                    <p className="text-gray-500">No active tasks in this project.</p>
+                                    <p className="text-gray-500">No active tasks {viewMode === 'project' ? 'in this project' : 'found'}.</p>
                                 </>
                             ) : viewMode === 'inbox' ? (
                                 <>
@@ -2850,8 +2905,14 @@ function ProjectsList() {
                         </div>
                     ) : (
                         <div className="space-y-6">
-                            {viewMode === 'project' && sections ? (
+                            {(viewMode === 'project' || viewMode === 'all_tasks') && sections ? (
                                 <>
+                                    {viewMode === 'all_tasks' && sections.inbox.length > 0 && (
+                                        <TaskSection title="Inbox" count={sections.inbox.length} colorClass="text-gray-700">
+                                            {renderTaskList(sections.inbox)}
+                                        </TaskSection>
+                                    )}
+
                                     {sections.due.length > 0 && (
                                         <TaskSection title="Due / Overdue" count={sections.due.length} colorClass="text-green-700">
                                             {renderTaskList(sections.due)}
@@ -2893,336 +2954,339 @@ function ProjectsList() {
             </div>
 
             {/* Keyboard Shortcuts Modal */}
-            {showShortcuts && (
-                <div className="absolute inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-                    <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-                        <div className="p-6 border-b border-gray-100 flex justify-between items-center">
-                            <div className="flex items-center gap-3">
-                                <Keyboard className="w-6 h-6 text-blue-600" />
-                                <h2 className="text-xl font-bold text-gray-900">Keyboard Shortcuts</h2>
+            {
+                showShortcuts && (
+                    <div className="absolute inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+                        <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+                            <div className="p-6 border-b border-gray-100 flex justify-between items-center">
+                                <div className="flex items-center gap-3">
+                                    <Keyboard className="w-6 h-6 text-blue-600" />
+                                    <h2 className="text-xl font-bold text-gray-900">Keyboard Shortcuts</h2>
+                                </div>
+                                <button
+                                    onClick={() => setShowShortcuts(false)}
+                                    className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                                >
+                                    <X className="w-5 h-5 text-gray-500" />
+                                </button>
                             </div>
-                            <button
-                                onClick={() => setShowShortcuts(false)}
-                                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                            >
-                                <X className="w-5 h-5 text-gray-500" />
-                            </button>
-                        </div>
 
-                        <div className="p-6 space-y-6">
-                            {/* Tasks Section */}
-                            <div>
-                                <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                                    <ListTodo className="w-5 h-5 text-blue-600" />
-                                    Tasks
-                                </h3>
-                                <div className="space-y-2">
-                                    <div className="flex justify-between items-center py-2 px-3 bg-gray-50 rounded-lg">
-                                        <span className="text-gray-700">Create task at the bottom</span>
-                                        <kbd className="px-3 py-1 bg-white border border-gray-300 rounded shadow-sm font-mono text-sm">N</kbd>
+                            <div className="p-6 space-y-6">
+                                {/* Tasks Section */}
+                                <div>
+                                    <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                                        <ListTodo className="w-5 h-5 text-blue-600" />
+                                        Tasks
+                                    </h3>
+                                    <div className="space-y-2">
+                                        <div className="flex justify-between items-center py-2 px-3 bg-gray-50 rounded-lg">
+                                            <span className="text-gray-700">Create task at the bottom</span>
+                                            <kbd className="px-3 py-1 bg-white border border-gray-300 rounded shadow-sm font-mono text-sm">N</kbd>
+                                        </div>
+                                        <div className="flex justify-between items-center py-2 px-3 bg-gray-50 rounded-lg">
+                                            <span className="text-gray-700">Create task at the top</span>
+                                            <kbd className="px-3 py-1 bg-white border border-gray-300 rounded shadow-sm font-mono text-sm">Shift + N</kbd>
+                                        </div>
                                     </div>
-                                    <div className="flex justify-between items-center py-2 px-3 bg-gray-50 rounded-lg">
-                                        <span className="text-gray-700">Create task at the top</span>
-                                        <kbd className="px-3 py-1 bg-white border border-gray-300 rounded shadow-sm font-mono text-sm">Shift + N</kbd>
+                                </div>
+
+                                {/* Projects Section */}
+                                <div>
+                                    <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                                        <ClipboardList className="w-5 h-5 text-blue-600" />
+                                        Projects
+                                    </h3>
+                                    <div className="space-y-2">
+                                        <div className="flex justify-between items-center py-2 px-3 bg-gray-50 rounded-lg">
+                                            <span className="text-gray-700">Create project at the bottom</span>
+                                            <kbd className="px-3 py-1 bg-white border border-gray-300 rounded shadow-sm font-mono text-sm">P</kbd>
+                                        </div>
+                                        <div className="flex justify-between items-center py-2 px-3 bg-gray-50 rounded-lg">
+                                            <span className="text-gray-700">Create project at the top</span>
+                                            <kbd className="px-3 py-1 bg-white border border-gray-300 rounded shadow-sm font-mono text-sm">Shift + P</kbd>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* General Section */}
+                                <div>
+                                    <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                                        <Keyboard className="w-5 h-5 text-blue-600" />
+                                        General
+                                    </h3>
+                                    <div className="space-y-2">
+                                        <div className="flex justify-between items-center py-2 px-3 bg-gray-50 rounded-lg">
+                                            <span className="text-gray-700">Show this help screen</span>
+                                            <kbd className="px-3 py-1 bg-white border border-gray-300 rounded shadow-sm font-mono text-sm">?</kbd>
+                                        </div>
+                                        <div className="flex justify-between items-center py-2 px-3 bg-gray-50 rounded-lg">
+                                            <span className="text-gray-700">Search for tasks and projects</span>
+                                            <kbd className="px-3 py-1 bg-white border border-gray-300 rounded shadow-sm font-mono text-sm">F</kbd>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
 
-                            {/* Projects Section */}
-                            <div>
-                                <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                                    <ClipboardList className="w-5 h-5 text-blue-600" />
-                                    Projects
-                                </h3>
-                                <div className="space-y-2">
-                                    <div className="flex justify-between items-center py-2 px-3 bg-gray-50 rounded-lg">
-                                        <span className="text-gray-700">Create project at the bottom</span>
-                                        <kbd className="px-3 py-1 bg-white border border-gray-300 rounded shadow-sm font-mono text-sm">P</kbd>
-                                    </div>
-                                    <div className="flex justify-between items-center py-2 px-3 bg-gray-50 rounded-lg">
-                                        <span className="text-gray-700">Create project at the top</span>
-                                        <kbd className="px-3 py-1 bg-white border border-gray-300 rounded shadow-sm font-mono text-sm">Shift + P</kbd>
-                                    </div>
-                                </div>
+                            <div className="p-4 bg-gray-50 border-t border-gray-100 text-center text-sm text-gray-600">
+                                Press <kbd className="px-2 py-0.5 bg-white border border-gray-300 rounded shadow-sm font-mono text-xs">Esc</kbd> to close
                             </div>
-
-                            {/* General Section */}
-                            <div>
-                                <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                                    <Keyboard className="w-5 h-5 text-blue-600" />
-                                    General
-                                </h3>
-                                <div className="space-y-2">
-                                    <div className="flex justify-between items-center py-2 px-3 bg-gray-50 rounded-lg">
-                                        <span className="text-gray-700">Show this help screen</span>
-                                        <kbd className="px-3 py-1 bg-white border border-gray-300 rounded shadow-sm font-mono text-sm">?</kbd>
-                                    </div>
-                                    <div className="flex justify-between items-center py-2 px-3 bg-gray-50 rounded-lg">
-                                        <span className="text-gray-700">Search for tasks and projects</span>
-                                        <kbd className="px-3 py-1 bg-white border border-gray-300 rounded shadow-sm font-mono text-sm">F</kbd>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="p-4 bg-gray-50 border-t border-gray-100 text-center text-sm text-gray-600">
-                            Press <kbd className="px-2 py-0.5 bg-white border border-gray-300 rounded shadow-sm font-mono text-xs">Esc</kbd> to close
                         </div>
                     </div>
-                </div>
-            )}
+                )
+            }
 
-            {selectedTaskDetails && (
-                <div className="absolute inset-0 z-50 bg-black/10 backdrop-blur-[1px] flex justify-end">
-                    {/* Click backdrop to close */}
-                    <div className="absolute inset-0" onClick={() => setSelectedTaskDetails(null)} />
+            {
+                selectedTaskDetails && (
+                    <div className="absolute inset-0 z-50 bg-black/10 backdrop-blur-[1px] flex justify-end">
+                        {/* Click backdrop to close */}
+                        <div className="absolute inset-0" onClick={() => setSelectedTaskDetails(null)} />
 
-                    <div className="relative w-96 bg-white shadow-2xl border-l border-gray-100 h-full flex flex-col animate-in slide-in-from-right duration-300">
-                        <div className="p-6 border-b border-gray-100 flex justify-between items-start bg-gray-50/50">
-                            <div>
-                                <h2 className="font-bold text-lg text-gray-900 break-words line-clamp-2">
-                                    {selectedTaskDetails.fields.CD_name?.value}
-                                </h2>
-                                <p className="text-xs text-gray-400 mt-1">Details</p>
-                            </div>
-                            <button onClick={() => setSelectedTaskDetails(null)} className="text-gray-400 hover:text-gray-600 mt-1">
-                                <X className="w-5 h-5" />
-                            </button>
-                        </div>
-
-                        <div className="flex-1 overflow-y-auto p-6 space-y-6">
-
-
-                            {/* Link Field */}
-                            <div className="space-y-4">
-                                <div className="flex items-center gap-4">
-                                    {/* Date Toggle */}
-                                    <div className="flex-1 flex items-center justify-between p-3 rounded-lg border border-gray-100 cursor-pointer hover:bg-gray-50 transition-colors" onClick={handleToggleDate}>
-                                        <div className="flex items-center gap-2">
-                                            <Calendar className={`w-4 h-4 ${selectedTaskDetails.fields.CD_dateactive?.value === 1 ? 'text-blue-500' : 'text-gray-400'}`} />
-                                            <span className={`text-sm font-medium ${selectedTaskDetails.fields.CD_dateactive?.value === 1 ? 'text-gray-900' : 'text-gray-500'}`}>Date</span>
-                                        </div>
-                                        <div className={`w-8 h-4 rounded-full p-0.5 transition-colors ${selectedTaskDetails.fields.CD_dateactive?.value === 1 ? 'bg-blue-500' : 'bg-gray-200'}`}>
-                                            <div className={`w-3 h-3 bg-white rounded-full transition-transform ${selectedTaskDetails.fields.CD_dateactive?.value === 1 ? 'translate-x-4' : ''}`} />
-                                        </div>
-                                    </div>
-
-                                    {/* Reminder Toggle */}
-                                    <div className="flex-1 flex items-center justify-between p-3 rounded-lg border border-gray-100 cursor-pointer hover:bg-gray-50 transition-colors" onClick={handleToggleReminder}>
-                                        <div className="flex items-center gap-2">
-                                            <Clock className={`w-4 h-4 ${selectedTaskDetails.fields.CD_reminderactive?.value === 1 ? 'text-blue-500' : 'text-gray-400'}`} />
-                                            <span className={`text-sm font-medium ${selectedTaskDetails.fields.CD_reminderactive?.value === 1 ? 'text-gray-900' : 'text-gray-500'}`}>Reminder</span>
-                                        </div>
-                                        <div className={`w-8 h-4 rounded-full p-0.5 transition-colors ${selectedTaskDetails.fields.CD_reminderactive?.value === 1 ? 'bg-blue-500' : 'bg-gray-200'}`}>
-                                            <div className={`w-3 h-3 bg-white rounded-full transition-transform ${selectedTaskDetails.fields.CD_reminderactive?.value === 1 ? 'translate-x-4' : ''}`} />
-                                        </div>
-                                    </div>
+                        <div className="relative w-96 bg-white shadow-2xl border-l border-gray-100 h-full flex flex-col animate-in slide-in-from-right duration-300">
+                            <div className="p-6 border-b border-gray-100 flex justify-between items-start bg-gray-50/50">
+                                <div>
+                                    <h2 className="font-bold text-lg text-gray-900 break-words line-clamp-2">
+                                        {selectedTaskDetails.fields.CD_name?.value}
+                                    </h2>
+                                    <p className="text-xs text-gray-400 mt-1">Details</p>
                                 </div>
-
-                                {/* Conditional Input */}
-                                {selectedTaskDetails.fields.CD_dateactive?.value === 1 && (
-                                    <div className="animate-in fade-in slide-in-from-top-2 duration-200">
-                                        <input
-                                            type={selectedTaskDetails.fields.CD_reminderactive?.value === 1 ? "datetime-local" : "date"}
-                                            className="w-full text-sm p-2 border border-blue-100 bg-blue-50/30 rounded-lg focus:ring-2 focus:ring-blue-100 focus:border-blue-400 outline-none transition-all text-gray-700"
-                                            value={selectedTaskDetails.fields.CD_date?.value ? (() => {
-                                                const d = new Date(selectedTaskDetails.fields.CD_date.value);
-                                                const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
-                                                return selectedTaskDetails.fields.CD_reminderactive?.value === 1
-                                                    ? local.toISOString().slice(0, 16)
-                                                    : local.toISOString().slice(0, 10);
-                                            })() : ''}
-                                            onChange={(e) => {
-                                                const dateVal = e.target.value ? new Date(e.target.value).getTime() : 0;
-                                                handleUpdateTaskDetail('CD_date', dateVal);
-                                            }}
-                                        />
-
-                                        <div className="mt-4 flex items-center justify-between">
-                                            <div
-                                                className="flex items-center gap-2 cursor-pointer group w-fit"
-                                                onClick={() => handleUpdateTaskDetail('CD_recurring', selectedTaskDetails.fields.CD_recurring?.value === 1 ? 0 : 1)}
-                                            >
-                                                <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${selectedTaskDetails.fields.CD_recurring?.value === 1 ? 'bg-blue-500 border-blue-500' : 'border-gray-300 group-hover:border-blue-400'}`}>
-                                                    {selectedTaskDetails.fields.CD_recurring?.value === 1 && <Check className="w-3 h-3 text-white" />}
-                                                </div>
-                                                <span className={`text-xs ${selectedTaskDetails.fields.CD_recurring?.value === 1 ? 'text-blue-600 font-medium' : 'text-gray-500 group-hover:text-gray-700'}`}>Recurring Task</span>
-                                            </div>
-
-                                            <div className="flex items-center gap-2">
-                                                <div
-                                                    className="flex items-center gap-2 cursor-pointer group w-fit"
-                                                    onClick={() => handleUpdateTaskDetail('CD_hideuntildate', selectedTaskDetails.fields.CD_hideuntildate?.value === 1 ? 0 : 1)}
-                                                >
-                                                    <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${selectedTaskDetails.fields.CD_hideuntildate?.value === 1 ? 'bg-blue-500 border-blue-500' : 'border-gray-300 group-hover:border-blue-400'}`}>
-                                                        {selectedTaskDetails.fields.CD_hideuntildate?.value === 1 && <Check className="w-3 h-3 text-white" />}
-                                                    </div>
-                                                    <span className={`text-xs ${selectedTaskDetails.fields.CD_hideuntildate?.value === 1 ? 'text-blue-600 font-medium' : 'text-gray-500 group-hover:text-gray-700'}`}>Hide until due</span>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        {selectedTaskDetails.fields.CD_recurring?.value === 1 && (
-                                            <div className="mt-2 flex items-center gap-2 animate-in fade-in slide-in-from-top-1 duration-200">
-                                                <div className="w-16">
-                                                    <input
-                                                        type="number"
-                                                        min="1"
-                                                        className="w-full text-xs p-1.5 border border-gray-200 rounded focus:ring-1 focus:ring-blue-500 outline-none"
-                                                        value={selectedTaskDetails.fields.CD_recurrence?.value || 1}
-                                                        onChange={(e) => handleUpdateTaskDetail('CD_recurrence', parseInt(e.target.value) || 1)}
-                                                    />
-                                                </div>
-                                                <div className="flex-1">
-                                                    <select
-                                                        className="w-full text-xs p-1.5 border border-gray-200 rounded focus:ring-1 focus:ring-blue-500 outline-none bg-white"
-                                                        value={selectedTaskDetails.fields.CD_recurrencetype?.value || 'days'}
-                                                        onChange={(e) => handleUpdateTaskDetail('CD_recurrencetype', e.target.value)}
-                                                    >
-                                                        <option value="days">Days</option>
-                                                        <option value="weeks">Weeks</option>
-                                                        <option value="months">Months</option>
-                                                        <option value="years">Years</option>
-                                                    </select>
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
+                                <button onClick={() => setSelectedTaskDetails(null)} className="text-gray-400 hover:text-gray-600 mt-1">
+                                    <X className="w-5 h-5" />
+                                </button>
                             </div>
 
-                            <hr className="border-gray-100" />
+                            <div className="flex-1 overflow-y-auto p-6 space-y-6">
 
-
-                            <div className="space-y-4">
-                                {/* Next Action (Calculated: !someday && !waiting) */}
-                                <div className="flex items-center justify-between group cursor-pointer" onClick={() => toggleStatus('next')}>
-                                    <div className="flex items-center gap-3">
-                                        <div className={`p-2 rounded-lg ${(!selectedTaskDetails.fields.CD_someday?.value && !selectedTaskDetails.fields.CD_waitingfor?.value) ? 'bg-yellow-100 text-yellow-600' : 'bg-gray-100 text-gray-400'}`}>
-                                            <Zap className="w-5 h-5" />
-                                        </div>
-                                        <div>
-                                            <p className="font-medium text-sm text-gray-900">Next Action</p>
-                                            <p className="text-xs text-gray-500">Do this as soon as possible</p>
-                                        </div>
-                                    </div>
-                                    <div className={`w-10 h-6 rounded-full p-1 transition-colors ${(!selectedTaskDetails.fields.CD_someday?.value && !selectedTaskDetails.fields.CD_waitingfor?.value) ? 'bg-yellow-500' : 'bg-gray-200'}`}>
-                                        <div className={`w-4 h-4 bg-white rounded-full transition-transform ${(!selectedTaskDetails.fields.CD_someday?.value && !selectedTaskDetails.fields.CD_waitingfor?.value) ? 'translate-x-4' : ''}`} />
-                                    </div>
-                                </div>
-
-                                <div className="flex items-center justify-between group cursor-pointer" onClick={() => toggleStatus('someday')}>
-                                    <div className="flex items-center gap-3">
-                                        <div className={`p-2 rounded-lg ${selectedTaskDetails.fields.CD_someday?.value === 1 ? 'bg-purple-100 text-purple-600' : 'bg-gray-100 text-gray-400'}`}>
-                                            <Moon className="w-5 h-5" />
-                                        </div>
-                                        <div>
-                                            <p className="font-medium text-sm text-gray-900">Someday / Maybe</p>
-                                            <p className="text-xs text-gray-500">No immediate action</p>
-                                        </div>
-                                    </div>
-                                    <div className={`w-10 h-6 rounded-full p-1 transition-colors ${selectedTaskDetails.fields.CD_someday?.value === 1 ? 'bg-purple-500' : 'bg-gray-200'}`}>
-                                        <div className={`w-4 h-4 bg-white rounded-full transition-transform ${selectedTaskDetails.fields.CD_someday?.value === 1 ? 'translate-x-4' : ''}`} />
-                                    </div>
-                                </div>
-
-                                <div className="flex items-center justify-between group cursor-pointer" onClick={() => toggleStatus('waiting')}>
-                                    <div className="flex items-center gap-3">
-                                        <div className={`p-2 rounded-lg ${selectedTaskDetails.fields.CD_waitingfor?.value === 1 ? 'bg-orange-100 text-orange-600' : 'bg-gray-100 text-gray-400'}`}>
-                                            <Hourglass className="w-5 h-5" />
-                                        </div>
-                                        <div>
-                                            <p className="font-medium text-sm text-gray-900">Waiting For</p>
-                                            <p className="text-xs text-gray-500">Waiting on someone else</p>
-                                        </div>
-                                    </div>
-                                    <div className={`w-10 h-6 rounded-full p-1 transition-colors ${selectedTaskDetails.fields.CD_waitingfor?.value === 1 ? 'bg-orange-500' : 'bg-gray-200'}`}>
-                                        <div className={`w-4 h-4 bg-white rounded-full transition-transform ${selectedTaskDetails.fields.CD_waitingfor?.value === 1 ? 'translate-x-4' : ''}`} />
-                                    </div>
-                                </div>
 
                                 {/* Link Field */}
-                                <div className="pt-2 border-t border-gray-50">
-                                    <label className="block text-xs font-medium text-gray-500 mb-1.5 ml-1">Link</label>
-                                    <div className="flex gap-2">
-                                        <div className="relative flex-1">
-                                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                                <svg className="w-4 h-4 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
-                                                    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
-                                                </svg>
+                                <div className="space-y-4">
+                                    <div className="flex items-center gap-4">
+                                        {/* Date Toggle */}
+                                        <div className="flex-1 flex items-center justify-between p-3 rounded-lg border border-gray-100 cursor-pointer hover:bg-gray-50 transition-colors" onClick={handleToggleDate}>
+                                            <div className="flex items-center gap-2">
+                                                <Calendar className={`w-4 h-4 ${selectedTaskDetails.fields.CD_dateactive?.value === 1 ? 'text-blue-500' : 'text-gray-400'}`} />
+                                                <span className={`text-sm font-medium ${selectedTaskDetails.fields.CD_dateactive?.value === 1 ? 'text-gray-900' : 'text-gray-500'}`}>Date</span>
                                             </div>
+                                            <div className={`w-8 h-4 rounded-full p-0.5 transition-colors ${selectedTaskDetails.fields.CD_dateactive?.value === 1 ? 'bg-blue-500' : 'bg-gray-200'}`}>
+                                                <div className={`w-3 h-3 bg-white rounded-full transition-transform ${selectedTaskDetails.fields.CD_dateactive?.value === 1 ? 'translate-x-4' : ''}`} />
+                                            </div>
+                                        </div>
+
+                                        {/* Reminder Toggle */}
+                                        <div className="flex-1 flex items-center justify-between p-3 rounded-lg border border-gray-100 cursor-pointer hover:bg-gray-50 transition-colors" onClick={handleToggleReminder}>
+                                            <div className="flex items-center gap-2">
+                                                <Clock className={`w-4 h-4 ${selectedTaskDetails.fields.CD_reminderactive?.value === 1 ? 'text-blue-500' : 'text-gray-400'}`} />
+                                                <span className={`text-sm font-medium ${selectedTaskDetails.fields.CD_reminderactive?.value === 1 ? 'text-gray-900' : 'text-gray-500'}`}>Reminder</span>
+                                            </div>
+                                            <div className={`w-8 h-4 rounded-full p-0.5 transition-colors ${selectedTaskDetails.fields.CD_reminderactive?.value === 1 ? 'bg-blue-500' : 'bg-gray-200'}`}>
+                                                <div className={`w-3 h-3 bg-white rounded-full transition-transform ${selectedTaskDetails.fields.CD_reminderactive?.value === 1 ? 'translate-x-4' : ''}`} />
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Conditional Input */}
+                                    {selectedTaskDetails.fields.CD_dateactive?.value === 1 && (
+                                        <div className="animate-in fade-in slide-in-from-top-2 duration-200">
                                             <input
-                                                type="text"
-                                                className="w-full pl-9 pr-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-100 focus:border-blue-400 outline-none transition-all placeholder:text-gray-400"
-                                                placeholder="Add a link..."
-                                                value={linkInput}
-                                                onChange={(e) => setLinkInput(e.target.value)}
-                                                onBlur={() => {
-                                                    if (selectedTaskDetails && linkInput !== (selectedTaskDetails.fields.CD_link?.value || '')) {
-                                                        handleUpdateTaskDetail('CD_link', linkInput);
-                                                    }
-                                                }}
-                                                onKeyDown={(e) => {
-                                                    if (e.key === 'Enter') {
-                                                        e.currentTarget.blur(); // Trigger blur to save
-                                                    }
+                                                type={selectedTaskDetails.fields.CD_reminderactive?.value === 1 ? "datetime-local" : "date"}
+                                                className="w-full text-sm p-2 border border-blue-100 bg-blue-50/30 rounded-lg focus:ring-2 focus:ring-blue-100 focus:border-blue-400 outline-none transition-all text-gray-700"
+                                                value={selectedTaskDetails.fields.CD_date?.value ? (() => {
+                                                    const d = new Date(selectedTaskDetails.fields.CD_date.value);
+                                                    const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+                                                    return selectedTaskDetails.fields.CD_reminderactive?.value === 1
+                                                        ? local.toISOString().slice(0, 16)
+                                                        : local.toISOString().slice(0, 10);
+                                                })() : ''}
+                                                onChange={(e) => {
+                                                    const dateVal = e.target.value ? new Date(e.target.value).getTime() : 0;
+                                                    handleUpdateTaskDetail('CD_date', dateVal);
                                                 }}
                                             />
+
+                                            <div className="mt-4 flex items-center justify-between">
+                                                <div
+                                                    className="flex items-center gap-2 cursor-pointer group w-fit"
+                                                    onClick={() => handleUpdateTaskDetail('CD_recurring', selectedTaskDetails.fields.CD_recurring?.value === 1 ? 0 : 1)}
+                                                >
+                                                    <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${selectedTaskDetails.fields.CD_recurring?.value === 1 ? 'bg-blue-500 border-blue-500' : 'border-gray-300 group-hover:border-blue-400'}`}>
+                                                        {selectedTaskDetails.fields.CD_recurring?.value === 1 && <Check className="w-3 h-3 text-white" />}
+                                                    </div>
+                                                    <span className={`text-xs ${selectedTaskDetails.fields.CD_recurring?.value === 1 ? 'text-blue-600 font-medium' : 'text-gray-500 group-hover:text-gray-700'}`}>Recurring Task</span>
+                                                </div>
+
+                                                <div className="flex items-center gap-2">
+                                                    <div
+                                                        className="flex items-center gap-2 cursor-pointer group w-fit"
+                                                        onClick={() => handleUpdateTaskDetail('CD_hideuntildate', selectedTaskDetails.fields.CD_hideuntildate?.value === 1 ? 0 : 1)}
+                                                    >
+                                                        <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${selectedTaskDetails.fields.CD_hideuntildate?.value === 1 ? 'bg-blue-500 border-blue-500' : 'border-gray-300 group-hover:border-blue-400'}`}>
+                                                            {selectedTaskDetails.fields.CD_hideuntildate?.value === 1 && <Check className="w-3 h-3 text-white" />}
+                                                        </div>
+                                                        <span className={`text-xs ${selectedTaskDetails.fields.CD_hideuntildate?.value === 1 ? 'text-blue-600 font-medium' : 'text-gray-500 group-hover:text-gray-700'}`}>Hide until due</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {selectedTaskDetails.fields.CD_recurring?.value === 1 && (
+                                                <div className="mt-2 flex items-center gap-2 animate-in fade-in slide-in-from-top-1 duration-200">
+                                                    <div className="w-16">
+                                                        <input
+                                                            type="number"
+                                                            min="1"
+                                                            className="w-full text-xs p-1.5 border border-gray-200 rounded focus:ring-1 focus:ring-blue-500 outline-none"
+                                                            value={selectedTaskDetails.fields.CD_recurrence?.value || 1}
+                                                            onChange={(e) => handleUpdateTaskDetail('CD_recurrence', parseInt(e.target.value) || 1)}
+                                                        />
+                                                    </div>
+                                                    <div className="flex-1">
+                                                        <select
+                                                            className="w-full text-xs p-1.5 border border-gray-200 rounded focus:ring-1 focus:ring-blue-500 outline-none bg-white"
+                                                            value={selectedTaskDetails.fields.CD_recurrencetype?.value || 'days'}
+                                                            onChange={(e) => handleUpdateTaskDetail('CD_recurrencetype', e.target.value)}
+                                                        >
+                                                            <option value="days">Days</option>
+                                                            <option value="weeks">Weeks</option>
+                                                            <option value="months">Months</option>
+                                                            <option value="years">Years</option>
+                                                        </select>
+                                                    </div>
+                                                </div>
+                                            )}
                                         </div>
-                                        {selectedTaskDetails.fields.CD_link?.value && (
-                                            <a
-                                                href={selectedTaskDetails.fields.CD_link.value.startsWith('http') ? selectedTaskDetails.fields.CD_link.value : `https://${selectedTaskDetails.fields.CD_link.value}`}
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                className="p-2 bg-purple-50 text-purple-600 rounded-lg hover:bg-purple-100 transition-colors flex items-center justify-center"
-                                                title="Open Link"
-                                            >
-                                                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
-                                                    <polyline points="15 3 21 3 21 9"></polyline>
-                                                    <line x1="10" y1="14" x2="21" y2="3"></line>
-                                                </svg>
-                                            </a>
-                                        )}
+                                    )}
+                                </div>
+
+                                <hr className="border-gray-100" />
+
+
+                                <div className="space-y-4">
+                                    {/* Next Action (Calculated: !someday && !waiting) */}
+                                    <div className="flex items-center justify-between group cursor-pointer" onClick={() => toggleStatus('next')}>
+                                        <div className="flex items-center gap-3">
+                                            <div className={`p-2 rounded-lg ${(!selectedTaskDetails.fields.CD_someday?.value && !selectedTaskDetails.fields.CD_waitingfor?.value) ? 'bg-yellow-100 text-yellow-600' : 'bg-gray-100 text-gray-400'}`}>
+                                                <Zap className="w-5 h-5" />
+                                            </div>
+                                            <div>
+                                                <p className="font-medium text-sm text-gray-900">Next Action</p>
+                                                <p className="text-xs text-gray-500">Do this as soon as possible</p>
+                                            </div>
+                                        </div>
+                                        <div className={`w-10 h-6 rounded-full p-1 transition-colors ${(!selectedTaskDetails.fields.CD_someday?.value && !selectedTaskDetails.fields.CD_waitingfor?.value) ? 'bg-yellow-500' : 'bg-gray-200'}`}>
+                                            <div className={`w-4 h-4 bg-white rounded-full transition-transform ${(!selectedTaskDetails.fields.CD_someday?.value && !selectedTaskDetails.fields.CD_waitingfor?.value) ? 'translate-x-4' : ''}`} />
+                                        </div>
+                                    </div>
+
+                                    <div className="flex items-center justify-between group cursor-pointer" onClick={() => toggleStatus('someday')}>
+                                        <div className="flex items-center gap-3">
+                                            <div className={`p-2 rounded-lg ${selectedTaskDetails.fields.CD_someday?.value === 1 ? 'bg-purple-100 text-purple-600' : 'bg-gray-100 text-gray-400'}`}>
+                                                <Moon className="w-5 h-5" />
+                                            </div>
+                                            <div>
+                                                <p className="font-medium text-sm text-gray-900">Someday / Maybe</p>
+                                                <p className="text-xs text-gray-500">No immediate action</p>
+                                            </div>
+                                        </div>
+                                        <div className={`w-10 h-6 rounded-full p-1 transition-colors ${selectedTaskDetails.fields.CD_someday?.value === 1 ? 'bg-purple-500' : 'bg-gray-200'}`}>
+                                            <div className={`w-4 h-4 bg-white rounded-full transition-transform ${selectedTaskDetails.fields.CD_someday?.value === 1 ? 'translate-x-4' : ''}`} />
+                                        </div>
+                                    </div>
+
+                                    <div className="flex items-center justify-between group cursor-pointer" onClick={() => toggleStatus('waiting')}>
+                                        <div className="flex items-center gap-3">
+                                            <div className={`p-2 rounded-lg ${selectedTaskDetails.fields.CD_waitingfor?.value === 1 ? 'bg-orange-100 text-orange-600' : 'bg-gray-100 text-gray-400'}`}>
+                                                <Hourglass className="w-5 h-5" />
+                                            </div>
+                                            <div>
+                                                <p className="font-medium text-sm text-gray-900">Waiting For</p>
+                                                <p className="text-xs text-gray-500">Waiting on someone else</p>
+                                            </div>
+                                        </div>
+                                        <div className={`w-10 h-6 rounded-full p-1 transition-colors ${selectedTaskDetails.fields.CD_waitingfor?.value === 1 ? 'bg-orange-500' : 'bg-gray-200'}`}>
+                                            <div className={`w-4 h-4 bg-white rounded-full transition-transform ${selectedTaskDetails.fields.CD_waitingfor?.value === 1 ? 'translate-x-4' : ''}`} />
+                                        </div>
+                                    </div>
+
+                                    {/* Link Field */}
+                                    <div className="pt-2 border-t border-gray-50">
+                                        <label className="block text-xs font-medium text-gray-500 mb-1.5 ml-1">Link</label>
+                                        <div className="flex gap-2">
+                                            <div className="relative flex-1">
+                                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                                    <svg className="w-4 h-4 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                                                        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+                                                    </svg>
+                                                </div>
+                                                <input
+                                                    type="text"
+                                                    className="w-full pl-9 pr-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-100 focus:border-blue-400 outline-none transition-all placeholder:text-gray-400"
+                                                    placeholder="Add a link..."
+                                                    value={linkInput}
+                                                    onChange={(e) => setLinkInput(e.target.value)}
+                                                    onBlur={() => {
+                                                        if (selectedTaskDetails && linkInput !== (selectedTaskDetails.fields.CD_link?.value || '')) {
+                                                            handleUpdateTaskDetail('CD_link', linkInput);
+                                                        }
+                                                    }}
+                                                    onKeyDown={(e) => {
+                                                        if (e.key === 'Enter') {
+                                                            e.currentTarget.blur(); // Trigger blur to save
+                                                        }
+                                                    }}
+                                                />
+                                            </div>
+                                            {selectedTaskDetails.fields.CD_link?.value && (
+                                                <a
+                                                    href={selectedTaskDetails.fields.CD_link.value.startsWith('http') ? selectedTaskDetails.fields.CD_link.value : `https://${selectedTaskDetails.fields.CD_link.value}`}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="p-2 bg-purple-50 text-purple-600 rounded-lg hover:bg-purple-100 transition-colors flex items-center justify-center"
+                                                    title="Open Link"
+                                                >
+                                                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                                                        <polyline points="15 3 21 3 21 9"></polyline>
+                                                        <line x1="10" y1="14" x2="21" y2="3"></line>
+                                                    </svg>
+                                                </a>
+                                            )}
+                                        </div>
+                                    </div>
+
+
+
+                                </div>
+
+                                {/* Notes Field */}
+                                <div>
+                                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                                        Notes
+                                    </label>
+                                    <textarea
+                                        value={noteInput}
+                                        onChange={(e) => setNoteInput(e.target.value)}
+                                        placeholder="Add notes..."
+                                        className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all resize-y min-h-[100px]"
+                                    />
+                                    <div className="flex justify-end mt-1">
+                                        <span className="text-[10px] text-gray-400">
+                                            {noteInput === (selectedTaskDetails?.fields.CD_note?.value || '') ? 'Saved' : 'Typing...'}
+                                        </span>
                                     </div>
                                 </div>
-
-
-
                             </div>
 
-                            {/* Notes Field */}
-                            <div>
-                                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
-                                    Notes
-                                </label>
-                                <textarea
-                                    value={noteInput}
-                                    onChange={(e) => setNoteInput(e.target.value)}
-                                    placeholder="Add notes..."
-                                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all resize-y min-h-[100px]"
-                                />
-                                <div className="flex justify-end mt-1">
-                                    <span className="text-[10px] text-gray-400">
-                                        {noteInput === (selectedTaskDetails?.fields.CD_note?.value || '') ? 'Saved' : 'Typing...'}
-                                    </span>
-                                </div>
+
+
+
+
+                            {/* Footer info */}
+                            <div className="p-4 bg-gray-50 text-xs text-gray-400 border-t border-gray-100 flex justify-between">
+                                <span>Change Tag: {selectedTaskDetails.recordChangeTag.slice(0, 8)}...</span>
+                                <span>{selectedTaskDetails.fields.CD_modifieddate?.value ? new Date(selectedTaskDetails.fields.CD_modifieddate.value).toLocaleTimeString() : 'No date'}</span>
                             </div>
-                        </div>
-
-
-
-
-
-                        {/* Footer info */}
-                        <div className="p-4 bg-gray-50 text-xs text-gray-400 border-t border-gray-100 flex justify-between">
-                            <span>Change Tag: {selectedTaskDetails.recordChangeTag.slice(0, 8)}...</span>
-                            <span>{selectedTaskDetails.fields.CD_modifieddate?.value ? new Date(selectedTaskDetails.fields.CD_modifieddate.value).toLocaleTimeString() : 'No date'}</span>
                         </div>
                     </div>
-                </div>
-            )
+                )
             }
 
         </div >

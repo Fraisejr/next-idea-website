@@ -24,8 +24,8 @@ import {
 import React from 'react';
 
 type SidebarProps = {
-    viewMode: 'project' | 'history' | 'inbox' | 'next_actions' | 'someday' | 'due' | 'waiting' | 'deferred';
-    setViewMode: (mode: 'project' | 'history' | 'inbox' | 'next_actions' | 'someday' | 'due' | 'waiting' | 'deferred') => void;
+    viewMode: 'project' | 'history' | 'inbox' | 'next_actions' | 'someday' | 'due' | 'waiting' | 'deferred' | 'all_tasks';
+    setViewMode: (mode: 'project' | 'history' | 'inbox' | 'next_actions' | 'someday' | 'due' | 'waiting' | 'deferred' | 'all_tasks') => void;
     selectedProject: ProjectRecord | null;
     setSelectedProject: (project: ProjectRecord | null) => void;
     projects: ProjectRecord[];
@@ -52,6 +52,7 @@ type SidebarProps = {
     onDropWaiting: (e: React.DragEvent) => void;
     onDropDeferred: (e: React.DragEvent) => void;
     onDropSomeday: (e: React.DragEvent) => void;
+    onDropInbox?: (e: React.DragEvent) => void;
     onShowShortcuts: (show: boolean) => void;
     counts?: {
         inbox: number;
@@ -61,6 +62,7 @@ type SidebarProps = {
         deferred: number;
         someday: number;
         history: number;
+        allTasks: number;
         projects: Record<string, number>;
     };
     searchQuery: string;
@@ -96,6 +98,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     onDropWaiting,
     onDropDeferred,
     onDropSomeday,
+    onDropInbox,
     onShowShortcuts,
     counts,
     searchQuery,
@@ -219,6 +222,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <div className="space-y-1">
                     <div
                         onClick={() => {
+                            setViewMode('all_tasks');
+                            setSelectedProject(null);
+                        }}
+                        className={`group flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${viewMode === 'all_tasks'
+                            ? 'bg-purple-50 text-purple-700'
+                            : 'hover:bg-gray-100 text-gray-700'
+                            }`}
+                    >
+                        <List className={`w-5 h-5 ${viewMode === 'all_tasks' ? 'text-purple-500' : 'text-gray-400'}`} />
+                        <span className={`font-medium flex-1 ${isHighlightList('all_tasks') ? 'text-indigo-600 font-semibold' : ''}`}>All tasks</span>
+                        {counts?.allTasks ? (
+                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${isHighlightList('all_tasks') ? 'bg-indigo-100 text-indigo-700' : 'bg-purple-100 text-purple-600'}`}>
+                                {counts.allTasks}
+                            </span>
+                        ) : null}
+                    </div>
+
+                    <div
+                        onClick={() => {
                             setViewMode('inbox');
                             setSelectedProject(null);
                         }}
@@ -241,7 +263,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 setDragOverProjectId(null);
                             }
                         }}
-                        onDrop={(e) => onDrop(e, { recordName: 'inbox-pseudo-project', recordType: 'CD_Project', fields: { CD_name: { value: 'Inbox' }, CD_id: { value: 'inbox' } } })}
+                        onDrop={(e) => onDropInbox && onDropInbox(e)}
                         className={`group flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${viewMode === 'inbox'
                             ? 'bg-gray-100 text-gray-900'
                             : dragOverProjectId === 'inbox-pseudo-project'
