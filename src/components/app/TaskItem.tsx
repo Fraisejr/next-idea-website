@@ -97,10 +97,10 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     };
 
     // Helper to determine if we should enable drag
-    const canDrag = (viewMode === 'project' || viewMode === 'inbox' || viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'waiting' || viewMode === 'deferred' || viewMode === 'due') && editingTaskId !== task.recordName;
+    const canDrag = (viewMode === 'project' || viewMode === 'all_tasks' || viewMode === 'inbox' || viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'waiting' || viewMode === 'deferred' || viewMode === 'due') && editingTaskId !== task.recordName;
 
     // Helper to determine if we should show actions
-    const showActions = (viewMode === 'project' || viewMode === 'inbox' || viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'waiting' || viewMode === 'deferred' || viewMode === 'due');
+    const showActions = (viewMode === 'project' || viewMode === 'all_tasks' || viewMode === 'inbox' || viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'waiting' || viewMode === 'deferred' || viewMode === 'due');
 
     return (
         <div

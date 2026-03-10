@@ -2002,34 +2002,49 @@ function ProjectsList() {
         }
 
         // Reorder locally
-        const newTasks = [...tasks];
-        const [movedTask] = newTasks.splice(oldIndex, 1);
-        newTasks.splice(newIndex, 0, movedTask);
+        let newTasks: TaskRecord[];
 
-        // Normalize Orders (1-based index)
+        if (viewMode === 'all_tasks') {
+            // In all_tasks mode, reorder only within the same section to avoid corrupting order across sections
+            const draggedTask = tasks[oldIndex];
+            const sectionKey = getTaskSection(draggedTask);
+            const sectionTasks = tasks.filter(t => getTaskSection(t) === sectionKey);
+            const sectionOldIndex = sectionTasks.findIndex(t => t.recordName === draggedTaskId);
+            let sectionNewIndex = sectionTasks.findIndex(t => t.recordName === targetTask.recordName);
+            if (dragOverPosition === 'bottom') sectionNewIndex += 1;
+            if (sectionOldIndex < sectionNewIndex) sectionNewIndex -= 1;
+
+            const newSectionTasks = [...sectionTasks];
+            const [movedTask] = newSectionTasks.splice(sectionOldIndex, 1);
+            newSectionTasks.splice(sectionNewIndex, 0, movedTask);
+
+            // Merge back: replace section tasks in global list
+            let si = 0;
+            newTasks = tasks.map(t => getTaskSection(t) === sectionKey ? newSectionTasks[si++] : t);
+        } else {
+            newTasks = [...tasks];
+            const [movedTask] = newTasks.splice(oldIndex, 1);
+            newTasks.splice(newIndex, 0, movedTask);
+        }
+
+        setTasks(newTasks);
+
+        // Normalize Orders (1-based index) and collect changed tasks to save
         const tasksToSave: any[] = [];
         const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
 
         newTasks.forEach((t, i) => {
             const newOrder = i + 1;
-            // Update if changed (always update dragged task, and shifted ones)
             if (t.fields.CD_order?.value !== newOrder) {
-                // Update local
                 t.fields.CD_order = { value: newOrder };
-
-                // Prepare for DB
                 tasksToSave.push({
                     recordName: t.recordName,
                     recordType: 'CD_Task',
                     recordChangeTag: t.recordChangeTag,
-                    fields: {
-                        CD_order: { value: newOrder }
-                    }
+                    fields: { CD_order: { value: newOrder } }
                 });
             }
         });
-
-        setTasks(newTasks);
 
         // Batch Save
         if (tasksToSave.length > 0) {
