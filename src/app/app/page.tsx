@@ -16,11 +16,23 @@ const getTaskSection = (task: TaskRecord) => {
     if (task.fields.CD_someday?.value === 1) return 'somedayMaybe';
 
     const now = Date.now();
+    const tomorrow = new Date();
+    tomorrow.setHours(24, 0, 0, 0);
+    const tomorrowTs = tomorrow.getTime();
+
     if (task.fields.CD_dateactive?.value === 1 && task.fields.CD_date?.value) {
-        if (task.fields.CD_hideuntildate?.value === 1 && task.fields.CD_date.value > now) {
-            return 'deferred';
+        if (task.fields.CD_date.value < tomorrowTs) {
+            return 'due'; // Due today or earlier
         }
-        return 'due';
+
+        const taskDateStart = new Date(task.fields.CD_date.value);
+        taskDateStart.setHours(0, 0, 0, 0);
+
+        if (task.fields.CD_hideuntildate?.value === 1 && taskDateStart.getTime() > now) {
+            return 'deferred'; // Hidden until future date/time
+        }
+        // If it has a date but is not due today and not hidden, it's just a regular next action
+        // (will be caught by the nextActions return at the end)
     }
 
     if (!task.fields.CD_project?.value) return 'inbox';
@@ -133,15 +145,21 @@ function ProjectsList() {
 
             // Due/Overdue: Date Active
             if (task.fields.CD_dateactive?.value === 1 && task.fields.CD_date?.value) {
-                // Priority 1: Deferred (Hidden until future date)
-                if (task.fields.CD_hideuntildate?.value === 1 && task.fields.CD_date.value > now) {
+                // Due/Overdue: always count if due today or earlier
+                if (task.fields.CD_date.value < tomorrowTs) {
+                    counts.due++;
+                }
+
+                // Get start of the task date
+                const taskDateStart = new Date(task.fields.CD_date.value);
+                taskDateStart.setHours(0, 0, 0, 0);
+
+                // Priority 1: Deferred (Hidden until future date uses START of date)
+                if (task.fields.CD_hideuntildate?.value === 1 && taskDateStart.getTime() > now) {
                     counts.deferred++;
                 }
-                // Priority 2: Due/Overdue (has active date) - if not deferred (or deferred date passed)
+                // Priority 2: Next Actions / Waiting / Someday
                 else {
-                    if (task.fields.CD_date.value < tomorrowTs) {
-                        counts.due++;
-                    }
                     // User Request: Include Due/Overdue in Next Actions count
                     if (task.fields.CD_waitingfor?.value === 1) {
                         counts.waiting++;
@@ -2391,10 +2409,15 @@ function ProjectsList() {
             const section = getTaskSection(t);
             if (section === 'due') {
                 due.push(t);
-                // ALSO add to Next Actions if it's not blocked (Waiting/Someday)
+                // ALSO add to Next Actions if it's not blocked (Waiting/Someday/Hidden)
                 // This allows users to see it in their main list flow as well
                 if (!t.fields.CD_waitingfor?.value && !t.fields.CD_someday?.value) {
-                    nextActions.push(t);
+                    const taskDateStart = t.fields.CD_date?.value ? new Date(t.fields.CD_date.value) : new Date(0);
+                    taskDateStart.setHours(0, 0, 0, 0);
+
+                    if (!(t.fields.CD_hideuntildate?.value === 1 && taskDateStart.getTime() > Date.now())) {
+                        nextActions.push(t);
+                    }
                 }
             }
             else if (section === 'waitingFor') waitingFor.push(t);
@@ -3002,11 +3025,13 @@ function ProjectsList() {
                                         <input
                                             type={selectedTaskDetails.fields.CD_reminderactive?.value === 1 ? "datetime-local" : "date"}
                                             className="w-full text-sm p-2 border border-blue-100 bg-blue-50/30 rounded-lg focus:ring-2 focus:ring-blue-100 focus:border-blue-400 outline-none transition-all text-gray-700"
-                                            value={selectedTaskDetails.fields.CD_date?.value ?
-                                                (selectedTaskDetails.fields.CD_reminderactive?.value === 1
-                                                    ? new Date(selectedTaskDetails.fields.CD_date.value).toISOString().slice(0, 16)
-                                                    : new Date(selectedTaskDetails.fields.CD_date.value).toISOString().slice(0, 10)
-                                                ) : ''}
+                                            value={selectedTaskDetails.fields.CD_date?.value ? (() => {
+                                                const d = new Date(selectedTaskDetails.fields.CD_date.value);
+                                                const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+                                                return selectedTaskDetails.fields.CD_reminderactive?.value === 1
+                                                    ? local.toISOString().slice(0, 16)
+                                                    : local.toISOString().slice(0, 10);
+                                            })() : ''}
                                             onChange={(e) => {
                                                 const dateVal = e.target.value ? new Date(e.target.value).getTime() : 0;
                                                 handleUpdateTaskDetail('CD_date', dateVal);
@@ -3032,7 +3057,7 @@ function ProjectsList() {
                                                     <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${selectedTaskDetails.fields.CD_hideuntildate?.value === 1 ? 'bg-blue-500 border-blue-500' : 'border-gray-300 group-hover:border-blue-400'}`}>
                                                         {selectedTaskDetails.fields.CD_hideuntildate?.value === 1 && <Check className="w-3 h-3 text-white" />}
                                                     </div>
-                                                    <span className={`text-xs ${selectedTaskDetails.fields.CD_hideuntildate?.value === 1 ? 'text-blue-600 font-medium' : 'text-gray-500 group-hover:text-gray-700'}`}>Hide until date</span>
+                                                    <span className={`text-xs ${selectedTaskDetails.fields.CD_hideuntildate?.value === 1 ? 'text-blue-600 font-medium' : 'text-gray-500 group-hover:text-gray-700'}`}>Hide until due</span>
                                                 </div>
                                             </div>
                                         </div>

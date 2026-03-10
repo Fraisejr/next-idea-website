@@ -164,9 +164,11 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                             <div className="flex items-center gap-1 ml-2">
                                 {task.fields.CD_date?.value && task.fields.CD_dateactive?.value === 1 ? (() => {
                                     const { text, className } = formatDate(task.fields.CD_date.value);
+                                    const hasTime = task.fields.CD_reminderactive?.value === 1;
+                                    const timeText = hasTime ? new Date(task.fields.CD_date.value).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
                                     return (
                                         <span className={`text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1 ${className}`}>
-                                            <Calendar className="w-3 h-3" /> {text}
+                                            <Calendar className="w-3 h-3" /> {text}{hasTime ? ` at ${timeText}` : ''}
                                         </span>
                                     );
                                 })() : null}
