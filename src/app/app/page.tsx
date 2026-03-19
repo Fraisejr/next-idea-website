@@ -76,6 +76,13 @@ function ProjectsList() {
     // Search State
     const [searchQuery, setSearchQuery] = useState('');
 
+    // Tag Filter State
+    const [selectedFilterTags, setSelectedFilterTags] = useState<Set<string>>(new Set());
+    const [excludedFilterTags, setExcludedFilterTags] = useState<Set<string>>(new Set());
+
+    // Refresh State
+    const [isRefreshing, setIsRefreshing] = useState(false);
+
     const [animationParent] = useAutoAnimate();
 
     // Sync link/note input when selected task changes
@@ -269,6 +276,100 @@ function ProjectsList() {
             delete updated[recordName];
             return updated;
         });
+    };
+
+    const handleManualRefresh = async () => {
+        if (!container || !isAuthenticated) return;
+        setIsRefreshing(true);
+        try {
+            const privateDB = container.privateCloudDatabase;
+            const options = { zoneID: { zoneName: 'com.apple.coredata.cloudkit.zone' } };
+
+            const fetchProjAndTags = async () => {
+                const query = {
+                    recordType: 'CD_Project',
+                    filterBy: [{ fieldName: 'CD_name', comparator: 'NOT_EQUALS', fieldValue: { value: '' } }],
+                    desiredKeys: ['CD_name', 'CD_id', 'CD_order', 'CD_completed', 'CD_singleactions', 'CD_focus', 'CD_icon', 'CD_color'],
+                    resultsLimit: 100
+                };
+                const projResult = await privateDB.performQuery(query, options);
+                if (!projResult.hasErrors) {
+                    let records = projResult.records as ProjectRecord[];
+                    records = records.filter(p => !p.fields.CD_completed || p.fields.CD_completed.value !== 1);
+                    records.sort((a, b) => {
+                        const isSingleA = a.fields.CD_singleactions?.value === 1;
+                        const isSingleB = b.fields.CD_singleactions?.value === 1;
+                        if (isSingleA && !isSingleB) return -1;
+                        if (!isSingleA && isSingleB) return 1;
+                        return (a.fields.CD_order?.value ?? 0) - (b.fields.CD_order?.value ?? 0);
+                    });
+                    setProjects(records);
+                }
+
+                const tagQuery = { recordType: 'CD_Tag', sortBy: [{ fieldName: 'CD_name', ascending: true }], resultsLimit: 100 };
+                const tagResult = await privateDB.performQuery(tagQuery, options);
+                if (!tagResult.hasErrors) setTags(tagResult.records as TagRecord[]);
+            };
+
+            const fetchTasks = async () => {
+                const query = {
+                    recordType: 'CD_Task',
+                    filterBy: [{ fieldName: 'CD_completed', comparator: 'NOT_EQUALS', fieldValue: { value: 1 } }],
+                    desiredKeys: [
+                        'CD_name', 'CD_id', 'CD_order', 'CD_project', 'CD_completed',
+                        'CD_someday', 'CD_waitingfor', 'CD_dateactive',
+                        'CD_date', 'CD_hideuntildate', 'CD_recurring', 'CD_recurrence', 'CD_recurrencetype',
+                        'CD_modifieddate', 'CD_link', 'CD_note'
+                    ],
+                    resultsLimit: 500
+                };
+                const result = await privateDB.performQuery(query, options);
+                if (!result.hasErrors) {
+                    const tasks = result.records as TaskRecord[];
+                    const cacheObject: Record<string, TaskRecord> = {};
+                    tasks.forEach(task => { cacheObject[task.recordName] = task; });
+                    updateTaskCache(() => cacheObject);
+                    lastCacheRefreshRef.current = Date.now();
+                }
+            };
+
+            const fetchRelations = async () => {
+                const query = { recordType: 'CDMR', sortBy: [{ fieldName: 'CD_entityNames', ascending: true }], resultsLimit: 500 };
+                const result = await privateDB.performQuery(query, options);
+                if (!result.hasErrors) {
+                    const records = result.records;
+                    const mapping: Record<string, string[]> = {};
+                    records.forEach((rel: any) => {
+                        const fields = rel.fields;
+                        if (fields.CD_entityNames && fields.CD_recordNames) {
+                            const entities = fields.CD_entityNames.value;
+                            const recordNames = fields.CD_recordNames.value;
+                            if (entities.includes('Task') && entities.includes('Tag')) {
+                                const entityParts = entities.split(':');
+                                const recordParts = recordNames.split(':');
+                                let taskRef = '';
+                                let tagRef = '';
+                                entityParts.forEach((part: string, index: number) => {
+                                    if (part.includes('Task')) taskRef = recordParts[index];
+                                    if (part.includes('Tag')) tagRef = recordParts[index];
+                                });
+                                if (taskRef && tagRef) {
+                                    if (!mapping[taskRef]) mapping[taskRef] = [];
+                                    mapping[taskRef].push(tagRef);
+                                }
+                            }
+                        }
+                    });
+                    setTaskTagMap(mapping);
+                }
+            };
+
+            await Promise.all([fetchProjAndTags(), fetchTasks(), fetchRelations()]);
+        } catch (error) {
+            console.error('[Manual Refresh] ❌ Error:', error);
+        } finally {
+            setIsRefreshing(false);
+        }
     };
 
     // Keyboard Shortcuts Modal
@@ -2262,26 +2363,13 @@ function ProjectsList() {
         // Only exclude 'history' view if we ever add toggling there (which usually just un-completes)
         if (viewMode !== 'history' && isCompleting) {
             setCompletingTaskIds(prev => new Set(prev).add(task.recordName));
-            if (!isRecurring) {
-                // Only hide if not recurring (recurrence stays in list but updates date)
-                setTimeout(() => {
-                    setCompletingTaskIds(prev => {
-                        const next = new Set(prev);
-                        next.delete(task.recordName);
-                        return next;
-                    });
-                }, 1000);
-            } else {
-                // Clean up the completing ID immediately after state update so it doesn't stay "faded"
-                setTimeout(() => {
-                    setCompletingTaskIds(prev => {
-                        const next = new Set(prev);
-                        next.delete(task.recordName);
-                        return next;
-                    });
-                }, 500); // Shorter flash for update
-
-            }
+            setTimeout(() => {
+                setCompletingTaskIds(prev => {
+                    const next = new Set(prev);
+                    next.delete(task.recordName);
+                    return next;
+                });
+            }, 1000);
         }
 
         const privateDB = container.privateCloudDatabase;
@@ -2347,13 +2435,22 @@ function ProjectsList() {
             setTasks(prev => {
                 const updatedList = prev.map(t =>
                     t.recordName === task.recordName
-                        ? { ...t, fields: { ...t.fields, CD_date: { value: nextTimestamp } } }
+                        ? { ...t, fields: { ...t.fields, CD_date: { value: nextTimestamp }, CD_completed: { value: 1 } } }
                         : t
                 );
                 // We typically don't show the history item in 'project' view, so no need to insert it into 'tasks' state
                 // unless we are in history view? But we are "completing" it, so it goes to history.
                 return updatedList;
             });
+
+            // After animation finishes, revert completion so it reappears as untouched with the new date
+            setTimeout(() => {
+                setTasks(currentTasks => currentTasks.map(t =>
+                    t.recordName === task.recordName
+                        ? { ...t, fields: { ...t.fields, CD_completed: { value: 0 } } }
+                        : t
+                ));
+            }, 1000);
 
             // Persist Batch
             try {
@@ -2474,6 +2571,22 @@ function ProjectsList() {
         }
     });
 
+    const tasksMatchingSearch = useMemo(() => {
+        return visibleTasks.filter(task => {
+            if (searchQuery.trim() && !matchingTaskIds.has(task.recordName)) return false;
+            return true;
+        });
+    }, [visibleTasks, searchQuery, matchingTaskIds]);
+
+    const availableTags = useMemo(() => {
+        const tagIds = new Set<string>();
+        tasksMatchingSearch.forEach(task => {
+            const taskTags = taskTagMap[task.recordName] || [];
+            taskTags.forEach(t => tagIds.add(t));
+        });
+        return tags.filter(tag => tagIds.has(tag.recordName)).sort((a,b) => (a.fields.CD_name?.value || '').localeCompare(b.fields.CD_name?.value || ''));
+    }, [tasksMatchingSearch, taskTagMap, tags]);
+
     const sections = useMemo(() => {
         if (viewMode !== 'project' && viewMode !== 'all_tasks') return null;
 
@@ -2485,23 +2598,35 @@ function ProjectsList() {
         const inbox: TaskRecord[] = [];
 
         visibleTasks.forEach(t => {
-            const section = getTaskSection(t);
+            // If the task is in the completing animation (optimistically marked done),
+            // getTaskSection returns 'completed', which would incorrectly fall into nextActions.
+            // Instead, derive the section as if it weren't completed so it stays in place.
+            let section = getTaskSection(t);
+            if (section === 'completed') {
+                // Re-derive section ignoring the completed flag
+                if (t.fields.CD_waitingfor?.value === 1) section = 'waitingFor';
+                else if (t.fields.CD_someday?.value === 1) section = 'somedayMaybe';
+                else if (t.fields.CD_dateactive?.value === 1 && t.fields.CD_date?.value) {
+                    const now = Date.now();
+                    const tomorrow = new Date();
+                    tomorrow.setHours(24, 0, 0, 0);
+                    if (t.fields.CD_date.value < tomorrow.getTime()) section = 'due';
+                    else {
+                        const taskDateStart = new Date(t.fields.CD_date.value);
+                        taskDateStart.setHours(0, 0, 0, 0);
+                        section = (t.fields.CD_hideuntildate?.value === 1 && taskDateStart.getTime() > now)
+                            ? 'deferred'
+                            : 'nextActions';
+                    }
+                } else if (!t.fields.CD_project?.value) section = 'inbox';
+                else section = 'nextActions';
+            }
 
             if (viewMode === 'all_tasks' && section === 'inbox') {
                 inbox.push(t);
             }
             else if (section === 'due') {
                 due.push(t);
-                // ALSO add to Next Actions if it's not blocked (Waiting/Someday/Hidden)
-                // This allows users to see it in their main list flow as well
-                if (!t.fields.CD_waitingfor?.value && !t.fields.CD_someday?.value) {
-                    const taskDateStart = t.fields.CD_date?.value ? new Date(t.fields.CD_date.value) : new Date(0);
-                    taskDateStart.setHours(0, 0, 0, 0);
-
-                    if (!(t.fields.CD_hideuntildate?.value === 1 && taskDateStart.getTime() > Date.now())) {
-                        nextActions.push(t);
-                    }
-                }
             }
             else if (section === 'waitingFor') waitingFor.push(t);
             else if (section === 'somedayMaybe') somedayMaybe.push(t);
@@ -2615,10 +2740,24 @@ function ProjectsList() {
     };
 
     const renderTaskList = (tasksToRender: TaskRecord[]) => {
-        // Filter passed tasks based on search
+        // Filter passed tasks based on search and tags
         const filteredTasks = tasksToRender.filter(task => {
             if (searchQuery.trim() && !matchingTaskIds.has(task.recordName)) {
                 return false;
+            }
+            
+            const taskTags = taskTagMap[task.recordName] || [];
+            
+            // Exclude FIRST: if task has ANY excluded tag, hide it
+            if (excludedFilterTags.size > 0 && taskTags.some(tagId => excludedFilterTags.has(tagId))) {
+                return false;
+            }
+
+            if (selectedFilterTags.size > 0) {
+                // ONLY show if it has at least one of the selected tags //
+                if (!taskTags.some(tagId => selectedFilterTags.has(tagId))) {
+                    return false;
+                }
             }
             return true;
         });
@@ -2862,6 +3001,8 @@ function ProjectsList() {
                 setSearchQuery={setSearchQuery}
                 projectsWithMatches={projectsWithMatches}
                 listsWithMatches={listsWithMatches}
+                onRefresh={handleManualRefresh}
+                isRefreshing={isRefreshing}
             />
             {/* Main Content: Tasks */}
             <div className="flex-1 flex flex-col overflow-hidden bg-white">
@@ -2891,6 +3032,99 @@ function ProjectsList() {
                         )}
                     </div>
                 </div>
+
+                {/* Tag Filter Bar */}
+                {availableTags.length > 0 && (
+                    <div className="px-6 py-3 border-b border-gray-100 flex items-center gap-2 overflow-x-auto bg-gray-50/50">
+                        <Tag className="w-4 h-4 text-gray-400 shrink-0" />
+                        {availableTags.map(tag => {
+                            const isIncluded = selectedFilterTags.has(tag.recordName);
+                            const isExcluded = excludedFilterTags.has(tag.recordName);
+                            
+                            const toggleInclude = () => {
+                                setSelectedFilterTags(prev => {
+                                    const next = new Set(prev);
+                                    if (next.has(tag.recordName)) next.delete(tag.recordName);
+                                    else next.add(tag.recordName);
+                                    return next;
+                                });
+                                if (!isIncluded) {
+                                    setExcludedFilterTags(prev => {
+                                        const next = new Set(prev);
+                                        next.delete(tag.recordName);
+                                        return next;
+                                    });
+                                }
+                            };
+
+                            const toggleExclude = () => {
+                                setExcludedFilterTags(prev => {
+                                    const next = new Set(prev);
+                                    if (next.has(tag.recordName)) next.delete(tag.recordName);
+                                    else next.add(tag.recordName);
+                                    return next;
+                                });
+                                if (!isExcluded) {
+                                    setSelectedFilterTags(prev => {
+                                        const next = new Set(prev);
+                                        next.delete(tag.recordName);
+                                        return next;
+                                    });
+                                }
+                            };
+
+                            return (
+                                <div
+                                    key={tag.recordName}
+                                    className={`flex items-center rounded-full text-xs font-medium transition-colors border overflow-hidden shrink-0 ${
+                                        isIncluded 
+                                            ? 'bg-blue-50 border-blue-200' 
+                                            : isExcluded
+                                                ? 'bg-red-50 border-red-200 opacity-80'
+                                                : 'bg-white border-gray-200'
+                                    }`}
+                                >
+                                    <button
+                                        onClick={toggleInclude}
+                                        className={`px-2 py-1 transition-colors hover:bg-blue-100 ${
+                                            isIncluded ? 'bg-blue-100 text-blue-700' : 'text-gray-400 hover:text-blue-600'
+                                        }`}
+                                        title="Include tag"
+                                    >
+                                        +
+                                    </button>
+                                    
+                                    <span className={`px-1 py-1 ${
+                                        isIncluded ? 'text-blue-700' : isExcluded ? 'text-red-700 line-through' : 'text-gray-600'
+                                    }`}>
+                                        {tag.fields.CD_name?.value}
+                                    </span>
+
+                                    <button
+                                        onClick={toggleExclude}
+                                        className={`px-2.5 py-1 transition-colors hover:bg-red-100 ${
+                                            isExcluded ? 'bg-red-100 text-red-700' : 'text-gray-400 hover:text-red-600'
+                                        }`}
+                                        title="Exclude tag"
+                                    >
+                                        −
+                                    </button>
+                                </div>
+                            );
+                        })}
+                        {(selectedFilterTags.size > 0 || excludedFilterTags.size > 0) && (
+                            <button
+                                onClick={() => {
+                                    setSelectedFilterTags(new Set());
+                                    setExcludedFilterTags(new Set());
+                                }}
+                                className="px-2 py-1 rounded-full text-xs font-medium text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors ml-auto shrink-0"
+                            >
+                                Clear filters
+                            </button>
+                        )}
+                    </div>
+                )}
 
                 {taskError && (
                     <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2 text-red-700 text-sm">
@@ -2942,7 +3176,7 @@ function ProjectsList() {
                                             onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
                                             onDrop={handleDropInbox}
                                         >
-                                            <TaskSection title="Inbox" count={sections.inbox.length} colorClass="text-gray-700">
+                                            <TaskSection key={`${viewMode}-${selectedProject?.recordName ?? 'all'}-inbox`} title="Inbox" count={sections.inbox.length} colorClass="text-gray-700">
                                                 {renderTaskList(sections.inbox)}
                                             </TaskSection>
                                         </div>
@@ -2953,7 +3187,7 @@ function ProjectsList() {
                                             onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
                                             onDrop={handleDropDue}
                                         >
-                                            <TaskSection title="Due / Overdue" count={sections.due.length} colorClass="text-green-700">
+                                            <TaskSection key={`${viewMode}-${selectedProject?.recordName ?? 'all'}-due`} title="Due / Overdue" count={sections.due.length} colorClass="text-green-700" defaultCollapsed={viewMode !== 'all_tasks'}>
                                                 {renderTaskList(sections.due)}
                                             </TaskSection>
                                         </div>
@@ -2964,7 +3198,7 @@ function ProjectsList() {
                                             onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
                                             onDrop={handleDropNextActions}
                                         >
-                                            <TaskSection title="Next Actions" count={sections.nextActions.length} colorClass="text-blue-700">
+                                            <TaskSection key={`${viewMode}-${selectedProject?.recordName ?? 'all'}-next`} title="Next Actions" count={sections.nextActions.length} colorClass="text-blue-700">
                                                 {renderTaskList(sections.nextActions)}
                                             </TaskSection>
                                         </div>
@@ -2975,7 +3209,7 @@ function ProjectsList() {
                                             onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
                                             onDrop={handleDropWaiting}
                                         >
-                                            <TaskSection title="Waiting For" count={sections.waitingFor.length} colorClass="text-orange-500">
+                                            <TaskSection key={`${viewMode}-${selectedProject?.recordName ?? 'all'}-waiting`} title="Waiting For" count={sections.waitingFor.length} colorClass="text-orange-500" defaultCollapsed={true}>
                                                 {renderTaskList(sections.waitingFor)}
                                             </TaskSection>
                                         </div>
@@ -2986,7 +3220,7 @@ function ProjectsList() {
                                             onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
                                             onDrop={handleDropDeferred}
                                         >
-                                            <TaskSection title="Deferred" count={sections.deferred.length} colorClass="text-gray-600">
+                                            <TaskSection key={`${viewMode}-${selectedProject?.recordName ?? 'all'}-deferred`} title="Deferred" count={sections.deferred.length} colorClass="text-gray-600" defaultCollapsed={true}>
                                                 {renderTaskList(sections.deferred)}
                                             </TaskSection>
                                         </div>
@@ -2997,7 +3231,7 @@ function ProjectsList() {
                                             onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
                                             onDrop={handleDropSomeday}
                                         >
-                                            <TaskSection title="Someday / Maybe" count={sections.someday.length} colorClass="text-[#92400e]">
+                                            <TaskSection key={`${viewMode}-${selectedProject?.recordName ?? 'all'}-someday`} title="Someday / Maybe" count={sections.someday.length} colorClass="text-[#92400e]" defaultCollapsed={true}>
                                                 {renderTaskList(sections.someday)}
                                             </TaskSection>
                                         </div>

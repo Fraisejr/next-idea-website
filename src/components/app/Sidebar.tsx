@@ -19,7 +19,8 @@ import {
     Users,
     Calendar,
     Search,
-    XCircle
+    XCircle,
+    RotateCcw
 } from 'lucide-react';
 import React from 'react';
 
@@ -69,6 +70,8 @@ type SidebarProps = {
     setSearchQuery: (query: string) => void;
     projectsWithMatches: Set<string>;
     listsWithMatches: Set<string>;
+    onRefresh: () => void;
+    isRefreshing: boolean;
 };
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -104,7 +107,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
     searchQuery,
     setSearchQuery,
     projectsWithMatches,
-    listsWithMatches
+    listsWithMatches,
+    onRefresh,
+    isRefreshing
 }) => {
     const [isSearchOpen, setIsSearchOpen] = React.useState(false);
     const searchInputRef = React.useRef<HTMLInputElement>(null);
@@ -167,7 +172,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     };
 
     return (
-        <div className="w-80 bg-gray-50 border-r border-gray-100 flex flex-col fixed md:relative h-full z-10 transition-transform md:translate-x-0 -translate-x-full">
+        <div className="w-[28rem] bg-gray-50 border-r border-gray-100 flex flex-col fixed md:relative h-full z-10 transition-transform md:translate-x-0 -translate-x-full">
             <div className="p-4 border-b border-gray-100 bg-white flex items-center justify-between h-[60px]">
                 {isSearchOpen ? (
                     <div className="flex items-center w-full gap-2 animate-in fade-in slide-in-from-left-2 duration-200">
@@ -205,6 +210,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                     <XCircle className="w-5 h-5" />
                                 </button>
                             )}
+                            <button
+                                onClick={onRefresh}
+                                disabled={isRefreshing}
+                                className={`p-1.5 rounded-full transition-colors ${isRefreshing ? 'text-blue-500' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'}`}
+                                title="Refresh"
+                            >
+                                <RotateCcw className={`w-5 h-5 ${isRefreshing ? 'animate-spin' : ''}`} />
+                            </button>
                             <button
                                 onClick={() => setIsSearchOpen(true)}
                                 className={`p-1.5 rounded-full transition-colors ${searchQuery ? 'text-indigo-600 bg-indigo-50' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'}`}
