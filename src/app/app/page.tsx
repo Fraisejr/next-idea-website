@@ -71,6 +71,9 @@ function ProjectsList() {
     const [selectedTaskDetails, setSelectedTaskDetails] = useState<TaskRecord | null>(null);
     const [linkInput, setLinkInput] = useState('');
     const [noteInput, setNoteInput] = useState('');
+    const [detailsSaveState, setDetailsSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
+    const detailsSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const noteDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [taskTagMap, setTaskTagMap] = useState<Record<string, string[]>>({});
 
     // Search State
@@ -1064,12 +1067,73 @@ function ProjectsList() {
         if (noteInput === currentNote) return;
 
         const timeoutId = setTimeout(() => {
-
             handleUpdateTaskDetail('CD_note', noteInput);
         }, 1500);
 
-        return () => clearTimeout(timeoutId);
+        noteDebounceTimerRef.current = timeoutId;
+        return () => {
+            clearTimeout(timeoutId);
+            noteDebounceTimerRef.current = null;
+        };
     }, [noteInput, selectedTaskDetails]);
+
+    // Close the details panel, flushing any pending debounced note saves first.
+    // The save runs in the background AFTER closing — we never call setSelectedTaskDetails
+    // again so the panel doesn't reopen.
+    const handleCloseDetailsPanel = () => {
+        const hasPendingNote = noteDebounceTimerRef.current !== null;
+        const taskSnapshot = selectedTaskDetails; // capture before nulling
+        const noteSnapshot = noteInput;
+
+        // Cancel the debounce timer
+        if (hasPendingNote) {
+            clearTimeout(noteDebounceTimerRef.current!);
+            noteDebounceTimerRef.current = null;
+        }
+
+        // Close the panel immediately
+        setSelectedTaskDetails(null);
+
+        // If there was a pending note change, save it in the background
+        if (hasPendingNote && taskSnapshot && container) {
+            const currentNote = taskSnapshot.fields.CD_note?.value || '';
+            if (noteSnapshot !== currentNote) {
+                // Fire-and-forget save — intentionally doesn't touch selectedTaskDetails
+                (async () => {
+                    try {
+                        const privateDB = container.privateCloudDatabase;
+                        const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
+                        const fetchResult = await privateDB.fetchRecords([taskSnapshot.recordName], { zoneID });
+                        if (fetchResult.hasErrors) throw new Error(fetchResult.errors[0].message);
+                        const latestRecord = fetchResult.records[0];
+                        const recordToSave = {
+                            recordName: latestRecord.recordName,
+                            recordChangeTag: latestRecord.recordChangeTag,
+                            fields: {
+                                CD_note: { value: noteSnapshot },
+                                CD_modifieddate: { value: Date.now() },
+                            }
+                        };
+                        const result = await privateDB.saveRecords([recordToSave], { zoneID });
+                        if (!result.hasErrors) {
+                            // Update tasks list and cache with new note + change tag
+                            const savedRecord = result.records[0];
+                            const updatedFields = {
+                                ...taskSnapshot.fields,
+                                CD_note: { value: noteSnapshot },
+                                CD_modifieddate: { value: Date.now() },
+                            };
+                            const finalTask = { ...taskSnapshot, fields: updatedFields, recordChangeTag: savedRecord.recordChangeTag };
+                            setTasks(prev => prev.map(t => t.recordName === taskSnapshot.recordName ? finalTask : t));
+                            upsertTaskInCache(finalTask);
+                        }
+                    } catch (err) {
+                        console.error('Background note save failed:', err);
+                    }
+                })();
+            }
+        }
+    };
 
     // ========== CACHE INITIALIZATION & REFRESH ==========
     // Initialize cache from localStorage and fetch all tasks on authentication
@@ -2443,17 +2507,42 @@ function ProjectsList() {
                 return updatedList;
             });
 
-            // After animation finishes, revert completion so it reappears as untouched with the new date
+            // After animation finishes, revert completion.
+            // If "hide until due" is set AND the new date is strictly in the future,
+            // remove the task immediately so it doesn't blink back into view.
+            // If the new date is today or in the past, reappear it normally.
+            const hideUntilDue = task.fields.CD_hideuntildate?.value === 1;
+            const tomorrowStart = new Date();
+            tomorrowStart.setDate(tomorrowStart.getDate() + 1);
+            tomorrowStart.setHours(0, 0, 0, 0);
+            const nextDateIsFuture = nextTimestamp >= tomorrowStart.getTime();
             setTimeout(() => {
-                setTasks(currentTasks => currentTasks.map(t =>
-                    t.recordName === task.recordName
-                        ? { ...t, fields: { ...t.fields, CD_completed: { value: 0 } } }
-                        : t
-                ));
+                setTasks(currentTasks => {
+                    if (hideUntilDue && nextDateIsFuture) {
+                        // Remove from the visible list — cache already has the updated record,
+                        // so it will reappear correctly when the view is switched or the cache refreshes.
+                        return currentTasks.filter(t => t.recordName !== task.recordName);
+                    }
+                    return currentTasks.map(t =>
+                        t.recordName === task.recordName
+                            ? { ...t, fields: { ...t.fields, CD_completed: { value: 0 } } }
+                            : t
+                    );
+                });
             }, 1000);
 
             // Persist Batch
             try {
+                // CRITICAL FIX: Fetch the latest version of the original task before saving
+                // to avoid CAS (conflict) errors when the background cache refresh has updated
+                // the record's change tag since we last loaded it.
+                const fetchResult = await privateDB.fetchRecords([task.recordName], { zoneID });
+                if (fetchResult.hasErrors) throw new Error(fetchResult.errors[0].message);
+                const latestOriginal = fetchResult.records[0];
+
+                // Use the freshly-fetched change tag for the update
+                originalUpdate.recordChangeTag = latestOriginal.recordChangeTag;
+
                 const result = await privateDB.saveRecords([historyRecord, originalUpdate], { zoneID });
                 if (result.hasErrors) throw new Error(result.errors[0].message);
 
@@ -2472,8 +2561,12 @@ function ProjectsList() {
             } catch (err) {
                 console.error('Recurring task save failed:', err);
                 alert('Failed to process recurring task');
-                // Revert local state?
-                window.location.reload();
+                // Revert optimistic local state so the task reappears as incomplete
+                setTasks(currentTasks => currentTasks.map(t =>
+                    t.recordName === task.recordName
+                        ? { ...t, fields: { ...t.fields, CD_completed: { value: 0 } } }
+                        : t
+                ));
             }
 
             return;
@@ -2829,6 +2922,10 @@ function ProjectsList() {
 
         // Persist
         try {
+            // Show saving indicator
+            if (detailsSaveTimerRef.current) clearTimeout(detailsSaveTimerRef.current);
+            setDetailsSaveState('saving');
+
             const privateDB = container.privateCloudDatabase;
             const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
 
@@ -2862,9 +2959,13 @@ function ProjectsList() {
             setSelectedTaskDetails(finalTask);
             setTasks(prev => prev.map(t => t.recordName === finalTask.recordName ? finalTask : t));
 
+            // Show 'saved' for 2 seconds then return to idle
+            setDetailsSaveState('saved');
+            detailsSaveTimerRef.current = setTimeout(() => setDetailsSaveState('idle'), 2000);
+
         } catch (err) {
             console.error('Failed to update task details:', err);
-            // Revert UI if needed or show error toast
+            setDetailsSaveState('idle');
         }
     };
 
@@ -3333,7 +3434,7 @@ function ProjectsList() {
                 selectedTaskDetails && (
                     <div className="absolute inset-0 z-50 bg-black/10 backdrop-blur-[1px] flex justify-end">
                         {/* Click backdrop to close */}
-                        <div className="absolute inset-0" onClick={() => setSelectedTaskDetails(null)} />
+                        <div className="absolute inset-0" onClick={handleCloseDetailsPanel} />
 
                         <div className="relative w-96 bg-white shadow-2xl border-l border-gray-100 h-full flex flex-col animate-in slide-in-from-right duration-300">
                             <div className="p-6 border-b border-gray-100 flex justify-between items-start bg-gray-50/50">
@@ -3341,9 +3442,23 @@ function ProjectsList() {
                                     <h2 className="font-bold text-lg text-gray-900 break-words line-clamp-2">
                                         {selectedTaskDetails.fields.CD_name?.value}
                                     </h2>
-                                    <p className="text-xs text-gray-400 mt-1">Details</p>
+                                    <div className="flex items-center gap-2 mt-1">
+                                        <p className="text-xs text-gray-400">Details</p>
+                                        {detailsSaveState === 'saving' && (
+                                            <span className="flex items-center gap-1 text-xs text-gray-400 animate-pulse">
+                                                <span className="w-1.5 h-1.5 rounded-full bg-gray-400 inline-block" />
+                                                Saving…
+                                            </span>
+                                        )}
+                                        {detailsSaveState === 'saved' && (
+                                            <span className="flex items-center gap-1 text-xs text-green-500 animate-in fade-in duration-200">
+                                                <Check className="w-3 h-3" />
+                                                Saved
+                                            </span>
+                                        )}
+                                    </div>
                                 </div>
-                                <button onClick={() => setSelectedTaskDetails(null)} className="text-gray-400 hover:text-gray-600 mt-1">
+                                <button onClick={handleCloseDetailsPanel} className="text-gray-400 hover:text-gray-600 mt-1">
                                     <X className="w-5 h-5" />
                                 </button>
                             </div>
@@ -3399,7 +3514,20 @@ function ProjectsList() {
                                             <div className="mt-4 flex items-center justify-between">
                                                 <div
                                                     className="flex items-center gap-2 cursor-pointer group w-fit"
-                                                    onClick={() => handleUpdateTaskDetail('CD_recurring', selectedTaskDetails.fields.CD_recurring?.value === 1 ? 0 : 1)}
+                                                    onClick={() => {
+                                                        const turningOn = selectedTaskDetails.fields.CD_recurring?.value !== 1;
+                                                        if (turningOn) {
+                                                            // Also write defaults for recurrence/recurrencetype if not already set,
+                                                            // so CloudKit never stores them as undefined/0.
+                                                            handleUpdateTaskDetail({
+                                                                CD_recurring: 1,
+                                                                CD_recurrence: selectedTaskDetails.fields.CD_recurrence?.value || 1,
+                                                                CD_recurrencetype: selectedTaskDetails.fields.CD_recurrencetype?.value || 'days',
+                                                            });
+                                                        } else {
+                                                            handleUpdateTaskDetail('CD_recurring', 0);
+                                                        }
+                                                    }}
                                                 >
                                                     <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${selectedTaskDetails.fields.CD_recurring?.value === 1 ? 'bg-blue-500 border-blue-500' : 'border-gray-300 group-hover:border-blue-400'}`}>
                                                         {selectedTaskDetails.fields.CD_recurring?.value === 1 && <Check className="w-3 h-3 text-white" />}
