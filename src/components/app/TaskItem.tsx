@@ -1,4 +1,5 @@
 import { ProjectRecord, TaskRecord, TagRecord } from '@/lib/cloudkit';
+import { SFSymbolMapper } from '@/components/SFSymbolMapper';
 import {
     Check,
     RotateCcw,
@@ -233,11 +234,19 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                         {/* Project Name and Tags */}
                         {(viewMode !== 'project' && task.fields.CD_project?.value || taskTags.length > 0) && (
                             <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                                {viewMode !== 'project' && task.fields.CD_project?.value && (
-                                    <span className="text-xs text-gray-400">
-                                        {projects.find(p => p.recordName === task.fields.CD_project?.value)?.fields.CD_name?.value}
-                                    </span>
-                                )}
+                                {viewMode !== 'project' && task.fields.CD_project?.value && (() => {
+                                    const proj = projects.find(p => p.recordName === task.fields.CD_project?.value);
+                                    return proj ? (
+                                        <span className="flex items-center gap-1 text-xs text-gray-400">
+                                            <SFSymbolMapper
+                                                symbol={proj.fields.CD_icon?.value}
+                                                color={proj.fields.CD_color?.value}
+                                                size={14}
+                                            />
+                                            {proj.fields.CD_name?.value}
+                                        </span>
+                                    ) : null;
+                                })()}
 
                                 {taskTags.length > 0 && (
                                     <div className="flex items-center gap-1.5">

@@ -2715,6 +2715,19 @@ function ProjectsList() {
                 else section = 'nextActions';
             }
 
+            // In all_tasks mode: a task that is due today or earlier should always appear in
+            // Due / Overdue, regardless of whether it is also marked Someday or Waiting For.
+            // This matches the behaviour of the standalone Due view.
+            if (viewMode === 'all_tasks' && section !== 'due') {
+                if (t.fields.CD_dateactive?.value === 1 && t.fields.CD_date?.value) {
+                    const tomorrow = new Date();
+                    tomorrow.setHours(24, 0, 0, 0);
+                    if (t.fields.CD_date.value < tomorrow.getTime()) {
+                        section = 'due';
+                    }
+                }
+            }
+
             if (viewMode === 'all_tasks' && section === 'inbox') {
                 inbox.push(t);
             }
