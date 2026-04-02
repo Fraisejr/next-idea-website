@@ -13,7 +13,8 @@ import {
     Info,
     ExternalLink,
     ArrowUpToLine,
-    ArrowDownToLine
+    ArrowDownToLine,
+    AlignLeft
 } from 'lucide-react';
 import React from 'react';
 
@@ -43,6 +44,7 @@ type TaskItemProps = {
     onEditClick: (task: TaskRecord) => void;
     onMoveToTop?: (task: TaskRecord) => void;
     onMoveToBottom?: (task: TaskRecord) => void;
+    onNoteChange?: (task: TaskRecord, newNote: string) => void;
 };
 
 export const TaskItem: React.FC<TaskItemProps> = ({
@@ -68,12 +70,39 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     onInsertTask,
     onEditClick,
     onMoveToTop,
-    onMoveToBottom
+    onMoveToBottom,
+    onNoteChange
 }) => {
 
     // Track whether the user cancelled editing (Escape / ✗ button)
     // so onBlur doesn't trigger a save when cancelling.
     const cancelledRef = React.useRef(false);
+
+    const [isNoteExpanded, setIsNoteExpanded] = React.useState(false); // Collapsed by default
+    const [localNote, setLocalNote] = React.useState(task.fields.CD_note?.value || '');
+    const noteDebounceTimerRef = React.useRef<NodeJS.Timeout | null>(null);
+
+    React.useEffect(() => {
+        setLocalNote(task.fields.CD_note?.value || '');
+    }, [task.fields.CD_note?.value]);
+
+    // Debounced Note Save matching Details Panel
+    React.useEffect(() => {
+        const currentNote = task.fields.CD_note?.value || '';
+        if (localNote === currentNote) return;
+
+        const timeoutId = setTimeout(() => {
+            if (onNoteChange) {
+                onNoteChange(task, localNote);
+            }
+        }, 1500);
+
+        noteDebounceTimerRef.current = timeoutId;
+        return () => {
+            clearTimeout(timeoutId);
+            noteDebounceTimerRef.current = null;
+        };
+    }, [localNote, task.fields.CD_note?.value, onNoteChange, task]);
 
     // Find associated tags
     const taskTags = taskTagMap[task.recordName]?.map(tagId => tags.find(t => t.recordName === tagId)).filter(Boolean) as TagRecord[] || [];
@@ -262,6 +291,42 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                                                 #{tag.fields.CD_name.value}
                                             </span>
                                         ))}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* Note Expansion */}
+                        {task.fields.CD_note?.value && task.fields.CD_note.value.trim().length > 0 && (
+                            <div className="w-full mt-2" onClick={(e) => e.stopPropagation()}>
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); setIsNoteExpanded(!isNoteExpanded); }}
+                                    className="flex items-center gap-1.5 text-[11px] font-medium text-gray-400 hover:text-gray-600 transition-colors"
+                                >
+                                    <AlignLeft className="w-3.5 h-3.5" />
+                                    <span>{isNoteExpanded ? 'Hide Note' : 'Show Note'}</span>
+                                </button>
+                                {isNoteExpanded && (
+                                    <div className="mt-1.5 w-full">
+                                        <textarea
+                                            value={localNote}
+                                            onChange={(e) => setLocalNote(e.target.value)}
+                                            onClick={(e) => e.stopPropagation()}
+                                            onKeyDown={(e) => {
+                                                // Optional: allow escaping out of note
+                                                if (e.key === 'Escape') {
+                                                    e.currentTarget.blur();
+                                                }
+                                            }}
+                                            className="p-2.5 bg-gray-50 text-gray-600 rounded-lg whitespace-pre-wrap text-[11px] border border-gray-100 max-h-60 overflow-y-auto w-full outline-none focus:ring-1 focus:ring-blue-300 resize-none font-mono"
+                                            rows={Math.max(2, localNote.split('\n').length)}
+                                            placeholder="Add a note..."
+                                        />
+                                        <div className="flex justify-end mt-1">
+                                            <span className="text-[10px] text-gray-400">
+                                                {localNote === (task.fields.CD_note?.value || '') ? 'Saved' : 'Typing...'}
+                                            </span>
+                                        </div>
                                     </div>
                                 )}
                             </div>

@@ -696,6 +696,48 @@ function ProjectsList() {
         }
     };
 
+    const handleTaskNoteChange = async (task: TaskRecord, newNote: string) => {
+        if (!container) return;
+
+        // Optimistic UI update
+        const updatedTask = {
+            ...task,
+            fields: {
+                ...task.fields,
+                CD_note: { value: newNote },
+                CD_modifieddate: { value: Date.now() }
+            }
+        };
+        setTasks(prev => prev.map(t => t.recordName === task.recordName ? updatedTask : t));
+        upsertTaskInCache(updatedTask);
+
+        try {
+            const privateDB = container.privateCloudDatabase;
+            const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
+            const tasksToSave = [{
+                recordName: updatedTask.recordName,
+                recordType: 'CD_Task',
+                recordChangeTag: updatedTask.recordChangeTag,
+                fields: { CD_note: { value: newNote } }
+            }];
+
+            const fetchResult = await privateDB.fetchRecords([task.recordName], { zoneID });
+            if (fetchResult.hasErrors) throw new Error(fetchResult.errors[0].message);
+
+            const fetchedRecord = fetchResult.records[0];
+            const freshTaskToSave = { ...tasksToSave[0], recordChangeTag: fetchedRecord.recordChangeTag };
+            
+            const saveResult = await privateDB.saveRecords([freshTaskToSave], { zoneID });
+            if (saveResult.hasErrors) throw new Error(saveResult.errors[0].message);
+
+            const savedRecord = saveResult.records[0];
+            setTasks(prev => prev.map(t => t.recordName === task.recordName ? { ...t, recordChangeTag: savedRecord.recordChangeTag } : t));
+            upsertTaskInCache(savedRecord);
+        } catch (e: any) {
+             console.error("Failed to save inline note update:", e);
+        }
+    };
+
     const handleCreateTask = () => {
         if ((!selectedProject && viewMode !== 'inbox' && viewMode !== 'next_actions' && viewMode !== 'someday' && viewMode !== 'due' && viewMode !== 'waiting' && viewMode !== 'deferred' && viewMode !== 'all_tasks') || editingTaskId) return; // Don't start if already editing
 
@@ -721,7 +763,7 @@ function ProjectsList() {
                 ...(viewMode === 'waiting' ? { CD_waitingfor: { value: 1 }, CD_someday: { value: 0 } } : {}),
                 ...(viewMode === 'deferred' ? { CD_date: { value: new Date(new Date().setHours(24, 0, 0, 0)).getTime() }, CD_dateactive: { value: 1 }, CD_hideuntildate: { value: 1 }, CD_someday: { value: 0 } } : {}),
                 CD_completed: { value: 0 },
-                CD_order: { value: tasks.reduce((max, t) => Math.max(max, t.fields.CD_order?.value || 0), 0) + 1 }
+                CD_order: { value: Object.values(allTasksCache).filter(t => t.fields.CD_completed?.value !== 1).reduce((max, t) => Math.max(max, t.fields.CD_order?.value || 0), 0) + 1 }
             }
         };
 
@@ -909,7 +951,7 @@ function ProjectsList() {
                 ...(viewMode === 'waiting' ? { CD_waitingfor: { value: 1 }, CD_someday: { value: 0 } } : {}),
                 ...(viewMode === 'deferred' ? { CD_date: { value: new Date(new Date().setHours(24, 0, 0, 0)).getTime() }, CD_dateactive: { value: 1 }, CD_hideuntildate: { value: 1 }, CD_someday: { value: 0 } } : {}),
                 CD_completed: { value: 0 },
-                CD_order: { value: tasks.filter(t => t.fields.CD_completed?.value !== 1).length > 0 ? Math.min(...tasks.filter(t => t.fields.CD_completed?.value !== 1).map(t => t.fields.CD_order?.value || 0)) - 1 : 0 }
+                CD_order: { value: (() => { const allUncompleted = Object.values(allTasksCache).filter(t => t.fields.CD_completed?.value !== 1); return allUncompleted.length > 0 ? Math.min(...allUncompleted.map(t => t.fields.CD_order?.value || 0)) - 1 : 0; })() }
             }
         };
 
@@ -2135,83 +2177,82 @@ function ProjectsList() {
         const oldIndex = tasks.findIndex(t => t.recordName === draggedTaskId);
         if (oldIndex === -1) return; // Task not in current list (maybe separate window?)
 
-        let newIndex = tasks.findIndex(t => t.recordName === targetTask.recordName);
-        if (newIndex === -1) return;
+        const draggedTask = tasks[oldIndex];
 
-        // If dropped on bottom half, insert AFTER target
-        if (dragOverPosition === 'bottom') {
-            newIndex += 1;
-        }
-
-        // If moving down, we need to adjust index because removal shifts indices
-        // But splice logic handles this if we do remove first then insert?
-        // Let's use standard array move logic
-        if (oldIndex < newIndex) {
-            // Moving down. e.g. 0 -> 2 (insert at 2). 
-            // If we remove 0, 1 becomes 0, 2 becomes 1. 
-            // So if we wanted to insert after 2, 2 is now at 1.
-            // Actually, if we use splice, we remove then insert.
-            newIndex -= 1;
-        }
-
-        // Enforce Section Constraints (Project View)
+        // Enforce Section Constraints (Project View / all_tasks)
         if ((viewMode === 'project' && selectedProject) || viewMode === 'all_tasks') {
-            const draggedTask = tasks[oldIndex];
             const draggedSection = getTaskSection(draggedTask);
             const targetSection = getTaskSection(targetTask);
-
-            if (draggedSection !== targetSection) {
-
-                return;
-            }
+            if (draggedSection !== targetSection) return;
         }
 
-        // Reorder locally
-        let newTasks: TaskRecord[];
+        // Establish the segment of tasks we are allowed to reorder (the current visual section)
+        let sectionTasks = tasks;
+        if ((viewMode === 'project' && selectedProject) || viewMode === 'all_tasks') {
+            const draggedSection = getTaskSection(draggedTask);
+            sectionTasks = tasks.filter(t => getTaskSection(t) === draggedSection);
+        }
 
-        if (viewMode === 'all_tasks') {
-            // In all_tasks mode, reorder only within the same section to avoid corrupting order across sections
-            const draggedTask = tasks[oldIndex];
-            const sectionKey = getTaskSection(draggedTask);
-            const sectionTasks = tasks.filter(t => getTaskSection(t) === sectionKey);
-            const sectionOldIndex = sectionTasks.findIndex(t => t.recordName === draggedTaskId);
-            let sectionNewIndex = sectionTasks.findIndex(t => t.recordName === targetTask.recordName);
-            if (dragOverPosition === 'bottom') sectionNewIndex += 1;
-            if (sectionOldIndex < sectionNewIndex) sectionNewIndex -= 1;
+        const itemToMove = sectionTasks.findIndex(t => t.recordName === draggedTaskId);
+        let destination = sectionTasks.findIndex(t => t.recordName === targetTask.recordName);
+        if (dragOverPosition === 'bottom') destination += 1;
 
-            const newSectionTasks = [...sectionTasks];
-            const [movedTask] = newSectionTasks.splice(sectionOldIndex, 1);
-            newSectionTasks.splice(sectionNewIndex, 0, movedTask);
+        if (itemToMove === -1 || destination === -1) return;
 
-            // Merge back: replace section tasks in global list
-            let si = 0;
-            newTasks = tasks.map(t => getTaskSection(t) === sectionKey ? newSectionTasks[si++] : t);
+        const tasksToSave: TaskRecord[] = [];
+        
+        if (itemToMove < destination) {
+            // Moving down
+            destination -= 1; // adjust because we are replacing, not inserting before
+            if (itemToMove === destination) return;
+
+            let startIndex = itemToMove + 1;
+            const endIndex = destination;
+            let startOrder = sectionTasks[itemToMove].fields.CD_order?.value ?? 0;
+            
+            while (startIndex <= endIndex) {
+                const t = sectionTasks[startIndex];
+                const updated = { ...t, fields: { ...t.fields, CD_order: { value: startOrder }, CD_modifieddate: { value: Date.now() } } };
+                tasksToSave.push(updated);
+                upsertTaskInCache(updated);
+                
+                startOrder += 1;
+                startIndex += 1;
+            }
+            const moved = { ...draggedTask, fields: { ...draggedTask.fields, CD_order: { value: startOrder }, CD_modifieddate: { value: Date.now() } } };
+            tasksToSave.push(moved);
+            upsertTaskInCache(moved);
+            
+        } else if (itemToMove > destination) {
+            // Moving up
+            let startIndex = destination;
+            const endIndex = itemToMove - 1;
+            const newOrder = sectionTasks[destination].fields.CD_order?.value ?? 0;
+            let startOrder = newOrder + 1;
+            
+            while (startIndex <= endIndex) {
+                const t = sectionTasks[startIndex];
+                const updated = { ...t, fields: { ...t.fields, CD_order: { value: startOrder }, CD_modifieddate: { value: Date.now() } } };
+                tasksToSave.push(updated);
+                upsertTaskInCache(updated);
+                
+                startOrder += 1;
+                startIndex += 1;
+            }
+            const moved = { ...draggedTask, fields: { ...draggedTask.fields, CD_order: { value: newOrder }, CD_modifieddate: { value: Date.now() } } };
+            tasksToSave.push(moved);
+            upsertTaskInCache(moved);
         } else {
-            newTasks = [...tasks];
-            const [movedTask] = newTasks.splice(oldIndex, 1);
-            newTasks.splice(newIndex, 0, movedTask);
+            return; // No movement
         }
 
-        setTasks(newTasks);
-
-        // Normalize Orders (1-based index) and collect changed tasks to save
-        const tasksToSave: any[] = [];
-        const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
-
-        newTasks.forEach((t, i) => {
-            const newOrder = i + 1;
-            if (t.fields.CD_order?.value !== newOrder) {
-                t.fields.CD_order = { value: newOrder };
-                tasksToSave.push({
-                    recordName: t.recordName,
-                    recordType: 'CD_Task',
-                    recordChangeTag: t.recordChangeTag,
-                    fields: { CD_order: { value: newOrder } }
-                });
-            }
+        // Apply visual resorting optimistic UI
+        setTasks(prev => {
+            const saveMap = new Map(tasksToSave.map(t => [t.recordName, t]));
+            return prev.map(t => saveMap.has(t.recordName) ? saveMap.get(t.recordName)! : t)
+                       .sort((a, b) => (a.fields.CD_order?.value ?? 0) - (b.fields.CD_order?.value ?? 0));
         });
 
-        // Batch Save
         if (tasksToSave.length > 0) {
             try {
                 const privateDB = container.privateCloudDatabase;
@@ -2756,19 +2797,19 @@ function ProjectsList() {
         const privateDB = container.privateCloudDatabase;
         const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
 
-        const uncompleted = visibleTasks.filter(t => t.fields.CD_completed?.value !== 1);
+        const uncompleted = Object.values(allTasksCache).filter(t => t.fields.CD_completed?.value !== 1);
         if (uncompleted.length === 0) return;
         const minOrder = Math.min(...uncompleted.map(t => t.fields.CD_order?.value ?? 0));
-        const newOrder = minOrder - 1000;
+        const newOrder = minOrder - 1;
 
+        const updatedTask = { ...task, fields: { ...task.fields, CD_order: { value: newOrder }, CD_modifieddate: { value: Date.now() } } };
         setTasks(prev => {
             const nextTasks = prev.map(t =>
-                t.recordName === task.recordName
-                    ? { ...t, fields: { ...t.fields, CD_order: { value: newOrder }, CD_modifieddate: { value: Date.now() } } }
-                    : t
+                t.recordName === task.recordName ? updatedTask : t
             );
             return nextTasks.sort((a, b) => (a.fields.CD_order?.value ?? 0) - (b.fields.CD_order?.value ?? 0));
         });
+        upsertTaskInCache(updatedTask);
 
         try {
             const fetchResult = await privateDB.fetchRecords([task.recordName], { zoneID });
@@ -2803,19 +2844,19 @@ function ProjectsList() {
         const privateDB = container.privateCloudDatabase;
         const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
 
-        const uncompleted = visibleTasks.filter(t => t.fields.CD_completed?.value !== 1);
+        const uncompleted = Object.values(allTasksCache).filter(t => t.fields.CD_completed?.value !== 1);
         if (uncompleted.length === 0) return;
         const maxOrder = Math.max(...uncompleted.map(t => t.fields.CD_order?.value ?? 0));
-        const newOrder = maxOrder + 1000;
+        const newOrder = maxOrder + 1;
 
+        const updatedTask = { ...task, fields: { ...task.fields, CD_order: { value: newOrder }, CD_modifieddate: { value: Date.now() } } };
         setTasks(prev => {
             const nextTasks = prev.map(t =>
-                t.recordName === task.recordName
-                    ? { ...t, fields: { ...t.fields, CD_order: { value: newOrder }, CD_modifieddate: { value: Date.now() } } }
-                    : t
+                t.recordName === task.recordName ? updatedTask : t
             );
             return nextTasks.sort((a, b) => (a.fields.CD_order?.value ?? 0) - (b.fields.CD_order?.value ?? 0));
         });
+        upsertTaskInCache(updatedTask);
 
         try {
             const fetchResult = await privateDB.fetchRecords([task.recordName], { zoneID });
@@ -2896,6 +2937,7 @@ function ProjectsList() {
                         onEditClick={handleTaskEditClick}
                         onMoveToTop={handleMoveToTop}
                         onMoveToBottom={handleMoveToBottom}
+                        onNoteChange={handleTaskNoteChange}
                     />
                 ))}
             </div>
@@ -3700,7 +3742,7 @@ function ProjectsList() {
                                         value={noteInput}
                                         onChange={(e) => setNoteInput(e.target.value)}
                                         placeholder="Add notes..."
-                                        className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all resize-y min-h-[100px]"
+                                        className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all resize-y min-h-[300px]"
                                     />
                                     <div className="flex justify-end mt-1">
                                         <span className="text-[10px] text-gray-400">
