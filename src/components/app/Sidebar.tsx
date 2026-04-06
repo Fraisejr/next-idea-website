@@ -20,7 +20,9 @@ import {
     Calendar,
     Search,
     XCircle,
-    RotateCcw
+    RotateCcw,
+    ArrowUpDown,
+    Info
 } from 'lucide-react';
 import React from 'react';
 
@@ -72,6 +74,8 @@ type SidebarProps = {
     listsWithMatches: Set<string>;
     onRefresh: () => void;
     isRefreshing: boolean;
+    onMoveDueToTop: () => void;
+    onInfoClick: (project: ProjectRecord) => void;
 };
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -109,7 +113,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
     projectsWithMatches,
     listsWithMatches,
     onRefresh,
-    isRefreshing
+    isRefreshing,
+    onMoveDueToTop,
+    onInfoClick
 }) => {
     const [isSearchOpen, setIsSearchOpen] = React.useState(false);
     const searchInputRef = React.useRef<HTMLInputElement>(null);
@@ -210,6 +216,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                     <XCircle className="w-5 h-5" />
                                 </button>
                             )}
+                            <button
+                                onClick={onMoveDueToTop}
+                                className="p-1.5 text-gray-400 hover:bg-gray-100 hover:text-blue-600 rounded-full transition-colors"
+                                title="Move Due to Top"
+                            >
+                                <ArrowUpDown className="w-5 h-5" />
+                            </button>
                             <button
                                 onClick={onRefresh}
                                 disabled={isRefreshing}
@@ -589,9 +602,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                                                 e.stopPropagation();
                                                                 onEditClick(project);
                                                             }}
-                                                            className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-blue-600 rounded"
+                                                            className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:bg-blue-50 hover:text-blue-600 rounded flex-shrink-0 transition-colors"
                                                         >
                                                             <Pencil className="w-3 h-3" />
+                                                        </button>
+                                                        <button
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                onInfoClick(project);
+                                                            }}
+                                                            className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:bg-blue-50 hover:text-blue-600 rounded flex-shrink-0 transition-colors"
+                                                        >
+                                                            <Info className="w-3 h-3" />
                                                         </button>
                                                     </div>
                                                 </div>
@@ -691,9 +713,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                                                         e.stopPropagation();
                                                                         onEditClick(project);
                                                                     }}
-                                                                    className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-blue-600 rounded"
+                                                                    className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:bg-blue-50 hover:text-blue-600 rounded flex-shrink-0 transition-colors"
                                                                 >
                                                                     <Pencil className="w-3 h-3" />
+                                                                </button>
+                                                                <button
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        onInfoClick(project);
+                                                                    }}
+                                                                    className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:bg-blue-50 hover:text-blue-600 rounded flex-shrink-0 transition-colors"
+                                                                >
+                                                                    <Info className="w-3 h-3" />
                                                                 </button>
                                                             </div>
                                                         </div>

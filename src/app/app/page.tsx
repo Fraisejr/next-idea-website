@@ -8,7 +8,8 @@ import { ProjectRecord, TaskRecord, TagRecord } from '@/lib/cloudkit';
 import { TaskItem } from '@/components/app/TaskItem';
 import { Sidebar } from '@/components/app/Sidebar';
 import { TaskSection } from '@/components/app/TaskSection';
-import { Loader2, ListTodo, CheckCircle2, Pencil, Check, X, ClipboardList, Plus, Clock, RotateCcw, Calendar, Hourglass, Repeat, Moon, ChevronRight, Zap, Inbox, Keyboard, CalendarClock, CalendarDays, Tag } from 'lucide-react';
+import { SFSymbolMapper } from '@/components/SFSymbolMapper';
+import { Loader2, ListTodo, CheckCircle2, Pencil, Check, X, ClipboardList, Plus, Clock, RotateCcw, Calendar, Hourglass, Repeat, Moon, ChevronRight, Zap, Inbox, Keyboard, CalendarClock, CalendarDays, Tag, Trash2 } from 'lucide-react';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
 
 const getTaskSection = (task: TaskRecord) => {
@@ -70,6 +71,8 @@ function ProjectsList() {
 
     // Details Panel State
     const [selectedTaskDetails, setSelectedTaskDetails] = useState<TaskRecord | null>(null);
+    const [selectedProjectDetails, setSelectedProjectDetails] = useState<ProjectRecord | null>(null);
+    const [projectDetailsSaveState, setProjectDetailsSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
     const [linkInput, setLinkInput] = useState('');
     const [noteInput, setNoteInput] = useState('');
     const [detailsSaveState, setDetailsSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
@@ -471,19 +474,12 @@ function ProjectsList() {
     };
 
     // Create new project just below the Single Actions list (Shift+P)
-    const handleCreateProjectAtTop = async () => {
+    const handleCreateProjectAtTop = () => {
         if (!container) return;
 
-        // Find Single Actions project (if any) — new project goes just after it
-        const singleActions = projects.find(p => p.fields.CD_singleactions?.value === 1);
-        const insertAfterOrder = singleActions?.fields.CD_order?.value ?? -1;
-
-        // Projects that need to shift down: non-singleactions projects whose order > insertAfterOrder
-        const projectsToShift = projects.filter(
-            p => p.fields.CD_singleactions?.value !== 1 && (p.fields.CD_order?.value ?? 0) > insertAfterOrder
-        );
-
-        const newOrder = insertAfterOrder + 1;
+        const regularProjects = projects.filter(p => p.fields.CD_singleactions?.value !== 1);
+        const minOrder = regularProjects.reduce((min, p) => Math.min(min, p.fields.CD_order?.value || 0), 0);
+        const newOrder = minOrder - 1;
 
         const newProject: ProjectRecord = {
             recordName: 'new-project',
@@ -498,15 +494,8 @@ function ProjectsList() {
             }
         };
 
-        // Shift affected projects up by 1
-        const shiftedProjects = projects.map(p =>
-            projectsToShift.some(ps => ps.recordName === p.recordName)
-                ? { ...p, fields: { ...p.fields, CD_order: { value: (p.fields.CD_order?.value || 0) + 1 } } }
-                : p
-        );
-
         // Insert new project and re-sort
-        const updatedProjects = [...shiftedProjects, newProject].sort((a, b) => {
+        const updatedProjects = [...projects, newProject].sort((a, b) => {
             const isSingleA = a.fields.CD_singleactions?.value === 1;
             const isSingleB = b.fields.CD_singleactions?.value === 1;
             if (isSingleA && !isSingleB) return -1;
@@ -517,21 +506,6 @@ function ProjectsList() {
         setProjects(updatedProjects);
         setEditingId('new-project');
         setEditName('');
-
-        // Persist order shifts in background
-        try {
-            const privateDB = container.privateCloudDatabase;
-            const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
-            const recordsToUpdate = projectsToShift.map(p => ({
-                recordName: p.recordName,
-                fields: { CD_order: { value: (p.fields.CD_order?.value || 0) + 1 } }
-            }));
-            if (recordsToUpdate.length > 0) {
-                await privateDB.saveRecords(recordsToUpdate, { zoneID });
-            }
-        } catch (err) {
-            console.error('Failed to shift projects:', err);
-        }
     };
 
     // Save new or edited project
@@ -1119,6 +1093,100 @@ function ProjectsList() {
             noteDebounceTimerRef.current = null;
         };
     }, [noteInput, selectedTaskDetails]);
+    const handleCloseProjectDetailsPanel = () => {
+        setSelectedProjectDetails(null);
+    };
+
+    const handleUpdateProjectDetail = async (field: keyof ProjectRecord['fields'], value: any) => {
+        if (!selectedProjectDetails || !container) return;
+
+        setProjectDetailsSaveState('saving');
+        
+        const updatedProject = {
+            ...selectedProjectDetails,
+            fields: {
+                ...selectedProjectDetails.fields,
+                [field]: { value },
+                CD_modifieddate: { value: Date.now() }
+            }
+        };
+
+        setSelectedProjectDetails(updatedProject as ProjectRecord);
+        setProjects(prev => prev.map(p => p.recordName === updatedProject.recordName ? updatedProject as ProjectRecord : p));
+
+        try {
+            const privateDB = container.privateCloudDatabase;
+            const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
+            
+            const fetchResult = await privateDB.fetchRecords([updatedProject.recordName], { zoneID });
+            if (fetchResult.hasErrors) throw new Error(fetchResult.errors[0].message);
+            
+            const freshRecord = fetchResult.records[0];
+
+            const recordToSave = {
+                recordName: updatedProject.recordName,
+                recordType: 'CD_Project',
+                recordChangeTag: freshRecord.recordChangeTag,
+                fields: {
+                    [field]: { value },
+                    CD_modifieddate: { value: Date.now() }
+                }
+            };
+
+            const saveResult = await privateDB.saveRecords([recordToSave], { zoneID });
+            if (saveResult.hasErrors) throw new Error(saveResult.errors[0].message);
+
+            const savedRecord = saveResult.records[0];
+            const totallyUpdatedProject = { ...updatedProject, recordChangeTag: savedRecord.recordChangeTag } as ProjectRecord;
+            
+            setSelectedProjectDetails(totallyUpdatedProject);
+            setProjects(prev => prev.map(p => p.recordName === totallyUpdatedProject.recordName ? totallyUpdatedProject : p));
+            setProjectDetailsSaveState('saved');
+            setTimeout(() => setProjectDetailsSaveState('idle'), 2000);
+        } catch (err) {
+            console.error('Failed to update project detail:', err);
+            setProjectDetailsSaveState('idle');
+        }
+    };
+
+    const handleCompleteProject = async () => {
+        if (!selectedProjectDetails || !container) return;
+        const projectId = selectedProjectDetails.recordName;
+        try {
+            const privateDB = container.privateCloudDatabase;
+            const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
+            const fetchResult = await privateDB.fetchRecords([projectId], { zoneID });
+            if (fetchResult.hasErrors) throw new Error(fetchResult.errors[0].message);
+            const freshRecord = fetchResult.records[0];
+            const recordToSave = {
+                recordName: projectId,
+                recordType: 'CD_Project',
+                recordChangeTag: freshRecord.recordChangeTag,
+                fields: { CD_completed: { value: 1 }, CD_modifieddate: { value: Date.now() } }
+            };
+            const saveResult = await privateDB.saveRecords([recordToSave], { zoneID });
+            if (saveResult.hasErrors) throw new Error(saveResult.errors[0].message);
+            setProjects(prev => prev.filter(p => p.recordName !== projectId));
+            setSelectedProjectDetails(null);
+        } catch (err) {
+            console.error('Failed to complete project:', err);
+        }
+    };
+
+    const handleDeleteProject = async () => {
+        if (!selectedProjectDetails || !container) return;
+        if (!window.confirm(`Delete "${selectedProjectDetails.fields.CD_name?.value}"? This cannot be undone.`)) return;
+        const projectId = selectedProjectDetails.recordName;
+        try {
+            const privateDB = container.privateCloudDatabase;
+            const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
+            await privateDB.deleteRecords([{ recordName: projectId }], { zoneID });
+            setProjects(prev => prev.filter(p => p.recordName !== projectId));
+            setSelectedProjectDetails(null);
+        } catch (err) {
+            console.error('Failed to delete project:', err);
+        }
+    };
 
     // Close the details panel, flushing any pending debounced note saves first.
     // The save runs in the background AFTER closing — we never call setSelectedTaskDetails
@@ -2793,6 +2861,109 @@ function ProjectsList() {
         setSelectedTaskDetails(task);
     };
 
+    const handleMoveDueToTop = async () => {
+        if (!container) return;
+        const privateDB = container.privateCloudDatabase;
+        const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
+
+        const uncompleted = Object.values(allTasksCache).filter(t => t.fields.CD_completed?.value !== 1);
+        if (uncompleted.length === 0) return;
+        
+        const sortedUncompleted = [...uncompleted].sort((a, b) => (a.fields.CD_order?.value ?? 0) - (b.fields.CD_order?.value ?? 0));
+        let nextOrder = (sortedUncompleted[0]?.fields.CD_order?.value ?? 0) - 1;
+
+        const now = Date.now();
+        const tomorrow = new Date();
+        tomorrow.setHours(24, 0, 0, 0);
+        const tomorrowTs = tomorrow.getTime();
+
+        const dueTasks = uncompleted.filter(task => {
+            if (task.fields.CD_dateactive?.value === 1 && task.fields.CD_date?.value) {
+                return task.fields.CD_date.value < tomorrowTs;
+            }
+            return false;
+        });
+
+        if (dueTasks.length === 0) return;
+
+        // Sort chronologically (oldest / most overdue first)
+        dueTasks.sort((a, b) => (a.fields.CD_date?.value || 0) - (b.fields.CD_date?.value || 0));
+
+        // We want the oldest task to be at the absolute top (lowest order).
+        // If minOrder is 0, and we have 2 tasks:
+        // Task 1 (Oldest) gets -2
+        // Task 2 (Newer) gets -1
+        let currentNextOrder = (sortedUncompleted[0]?.fields.CD_order?.value ?? 0) - dueTasks.length;
+
+        const updatedTasksMap = new Map<string, TaskRecord>();
+
+        dueTasks.forEach(task => {
+            const fieldsUpdates: any = {
+                CD_order: { value: currentNextOrder },
+                CD_modifieddate: { value: Date.now() }
+            };
+
+            if (task.fields.CD_someday?.value === 1) {
+                fieldsUpdates.CD_someday = { value: 0 };
+            }
+
+            const updatedTask: TaskRecord = { 
+                ...task, 
+                fields: { 
+                    ...task.fields, 
+                    ...fieldsUpdates
+                } 
+            };
+            
+            updatedTasksMap.set(task.recordName, updatedTask);
+            currentNextOrder += 1;
+        });
+
+        setTasks(prev => {
+            const nextTasks = prev.map(t => {
+                if (updatedTasksMap.has(t.recordName)) {
+                    return updatedTasksMap.get(t.recordName)!;
+                }
+                return t;
+            });
+            return nextTasks.sort((a, b) => (a.fields.CD_order?.value ?? 0) - (b.fields.CD_order?.value ?? 0));
+        });
+        
+        updatedTasksMap.forEach(t => upsertTaskInCache(t));
+
+        try {
+            const fetchResult = await privateDB.fetchRecords(Array.from(updatedTasksMap.keys()), { zoneID });
+            if (fetchResult.hasErrors) throw new Error(fetchResult.errors[0].message);
+            
+            const fetchedRecords = fetchResult.records;
+            const recordsToSave = fetchedRecords.map((fetchedRecord: any) => {
+                const updatedTask = updatedTasksMap.get(fetchedRecord.recordName)!;
+                return {
+                    recordName: fetchedRecord.recordName,
+                    recordChangeTag: fetchedRecord.recordChangeTag,
+                    fields: {
+                        CD_order: updatedTask.fields.CD_order,
+                        CD_someday: updatedTask.fields.CD_someday,
+                        CD_modifieddate: updatedTask.fields.CD_modifieddate
+                    }
+                };
+            });
+
+            const result = await privateDB.saveRecords(recordsToSave, { zoneID });
+            if (result.hasErrors) throw new Error(result.errors[0].message);
+
+            const savedRecords = result.records;
+            setTasks(prev => prev.map(t => {
+                const savedRecord = savedRecords.find((sr: any) => sr.recordName === t.recordName);
+                return savedRecord
+                    ? { ...t, recordChangeTag: savedRecord.recordChangeTag }
+                    : t;
+            }));
+        } catch (err) {
+            console.error('Failed to move due tasks to top', err);
+        }
+    };
+
     const handleMoveToTop = async (task: TaskRecord) => {
         if (!container) return;
         const privateDB = container.privateCloudDatabase;
@@ -3122,7 +3293,7 @@ function ProjectsList() {
     }
 
     return (
-        <div className="flex h-[calc(100vh-64px)] mt-16 bg-white overflow-hidden relative">
+        <div className="flex h-full bg-white overflow-hidden relative">
             {/* Sidebar: Projects */}
             <Sidebar
                 viewMode={viewMode}
@@ -3160,6 +3331,8 @@ function ProjectsList() {
                 listsWithMatches={listsWithMatches}
                 onRefresh={handleManualRefresh}
                 isRefreshing={isRefreshing}
+                onMoveDueToTop={handleMoveDueToTop}
+                onInfoClick={setSelectedProjectDetails}
             />
             {/* Main Content: Tasks */}
             <div className="flex-1 flex flex-col overflow-hidden bg-white">
@@ -3767,6 +3940,114 @@ function ProjectsList() {
                 )
             }
 
+            {
+                selectedProjectDetails && (
+                    <div className="absolute inset-0 z-50 bg-black/10 backdrop-blur-[1px] flex justify-end">
+                        <div className="absolute inset-0" onClick={handleCloseProjectDetailsPanel} />
+
+                        <div className="relative w-96 bg-white shadow-2xl border-l border-gray-100 h-full flex flex-col animate-in slide-in-from-right duration-300">
+                            <div className="p-6 border-b border-gray-100 flex justify-between items-start bg-gray-50/50">
+                                <div>
+                                    <h2 className="font-bold text-lg text-gray-900 break-words line-clamp-2">
+                                        {selectedProjectDetails.fields.CD_name?.value || 'Untitled Project'}
+                                    </h2>
+                                    <div className="flex items-center gap-2 mt-1">
+                                        <p className="text-xs text-gray-400">Project Details</p>
+                                        {projectDetailsSaveState === 'saving' && (
+                                            <span className="flex items-center gap-1 text-xs text-gray-400 animate-pulse">
+                                                <span className="w-1.5 h-1.5 rounded-full bg-gray-400 inline-block" />
+                                                Saving…
+                                            </span>
+                                        )}
+                                        {projectDetailsSaveState === 'saved' && (
+                                            <span className="flex items-center gap-1 text-xs text-green-500 animate-in fade-in duration-200">
+                                                <Check className="w-3 h-3" />
+                                                Saved
+                                            </span>
+                                        )}
+                                    </div>
+                                </div>
+                                <button onClick={handleCloseProjectDetailsPanel} className="text-gray-400 hover:text-gray-600 mt-1">
+                                    <X className="w-5 h-5" />
+                                </button>
+                            </div>
+
+                            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                                {/* Color Picker */}
+                                <div>
+                                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Color</label>
+                                    <div className="flex flex-wrap gap-2">
+                                        {['red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'purple', 'gray', 'black', 'brown'].map(c => (
+                                            <button
+                                                key={c}
+                                                onClick={() => handleUpdateProjectDetail('CD_color', c)}
+                                                className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-transform ${selectedProjectDetails.fields.CD_color?.value === c ? 'border-gray-900 scale-110' : 'border-transparent hover:scale-105'}`}
+                                                style={{ backgroundColor: c }}
+                                            />
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <hr className="border-gray-100" />
+
+                                {/* Icon Picker */}
+                                <div>
+                                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Icon</label>
+                                    <div className="grid grid-cols-6 gap-2">
+                                        {[
+                                            "1.circle.fill", "2.circle.fill", "3.circle.fill", "4.circle.fill", "pencil", "calendar", "checkmark.seal", "folder.fill", "lightbulb", "gearshape.fill", "hammer.fill", "paintpalette", "music.note", "film", "book.fill", "graduationcap.fill", "leaf.fill", "heart.fill", "house.fill", "car.fill", "airplane.circle.fill", "briefcase.fill", "gamecontroller.fill", "cup.and.saucer.fill", "dollarsign.circle.fill", "doc.fill", "cart.fill", "person.2.fill"
+                                        ].map(iconName => {
+                                            const isSelected = selectedProjectDetails.fields.CD_icon?.value === iconName;
+                                            return (
+                                                <button
+                                                    key={iconName}
+                                                    onClick={() => handleUpdateProjectDetail('CD_icon', iconName)}
+                                                    className={`p-2 rounded-lg flex items-center justify-center transition-colors ${isSelected ? 'bg-blue-100 text-blue-600' : 'bg-gray-50 text-gray-400 hover:bg-gray-100'}`}
+                                                    title={iconName}
+                                                >
+                                                    <SFSymbolMapper symbol={iconName} size={20} />
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+
+                                {/* Complete / Delete — only when no open tasks */}
+                                {(() => {
+                                    const hasOpenTasks = tasks.some(
+                                        t => t.fields.CD_project?.value === selectedProjectDetails.recordName
+                                            && t.fields.CD_completed?.value !== 1
+                                    );
+                                    if (hasOpenTasks) return null;
+                                    return (
+                                        <>
+                                            <hr className="border-gray-100" />
+                                            <div className="space-y-2">
+                                                <p className="text-xs text-gray-400 text-center">No open tasks — you can finalise this project.</p>
+                                                <button
+                                                    onClick={handleCompleteProject}
+                                                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-green-50 text-green-700 hover:bg-green-100 border border-green-200 rounded-lg text-sm font-medium transition-colors"
+                                                >
+                                                    <Check className="w-4 h-4" />
+                                                    Mark Project as Complete
+                                                </button>
+                                                <button
+                                                    onClick={handleDeleteProject}
+                                                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 rounded-lg text-sm font-medium transition-colors"
+                                                >
+                                                    <Trash2 className="w-4 h-4" />
+                                                    Delete Project
+                                                </button>
+                                            </div>
+                                        </>
+                                    );
+                                })()}
+                            </div>
+                        </div>
+                    </div>
+                )
+            }
+
         </div >
     );
 }
@@ -3775,13 +4056,12 @@ function ProjectsList() {
 export default function AppPage() {
     return (
         <CloudKitProvider>
-            <main className="min-h-screen bg-white">
+            <div className="h-screen overflow-hidden bg-white flex flex-col">
                 <Navbar />
-                <div className="pt-20">
+                <div className="flex-1 overflow-hidden mt-16">
                     <ProjectsList />
                 </div>
-                <Footer />
-            </main>
+            </div>
         </CloudKitProvider>
     );
 }
