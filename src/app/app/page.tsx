@@ -10,6 +10,7 @@ import { Sidebar } from '@/components/app/Sidebar';
 import { TaskSection } from '@/components/app/TaskSection';
 import { Loader2, ListTodo, CheckCircle2, Pencil, Check, X, ClipboardList, Plus, Clock, RotateCcw, Calendar, Hourglass, Repeat, Moon, ChevronRight, Zap, Inbox, Keyboard, CalendarClock, CalendarDays, Tag } from 'lucide-react';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
+
 const getTaskSection = (task: TaskRecord) => {
     if (task.fields.CD_completed?.value === 1) return 'completed';
     if (task.fields.CD_waitingfor?.value === 1) return 'waitingFor';
@@ -3343,7 +3344,7 @@ function ProjectsList() {
                                             onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
                                             onDrop={handleDropDue}
                                         >
-                                            <TaskSection key={`${viewMode}-${selectedProject?.recordName ?? 'all'}-due`} title="Due / Overdue" count={sections.due.length} colorClass="text-green-700" defaultCollapsed={viewMode !== 'all_tasks'}>
+                                            <TaskSection key={`${viewMode}-${selectedProject?.recordName ?? 'all'}-due`} title="Due / Overdue" count={sections.due.length} colorClass="text-green-700">
                                                 {renderTaskList(sections.due)}
                                             </TaskSection>
                                         </div>
@@ -3365,7 +3366,7 @@ function ProjectsList() {
                                             onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
                                             onDrop={handleDropWaiting}
                                         >
-                                            <TaskSection key={`${viewMode}-${selectedProject?.recordName ?? 'all'}-waiting`} title="Waiting For" count={sections.waitingFor.length} colorClass="text-orange-500" defaultCollapsed={true}>
+                                            <TaskSection key={`${viewMode}-${selectedProject?.recordName ?? 'all'}-waiting`} title="Waiting For" count={sections.waitingFor.length} colorClass="text-orange-500">
                                                 {renderTaskList(sections.waitingFor)}
                                             </TaskSection>
                                         </div>
@@ -3376,7 +3377,7 @@ function ProjectsList() {
                                             onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
                                             onDrop={handleDropDeferred}
                                         >
-                                            <TaskSection key={`${viewMode}-${selectedProject?.recordName ?? 'all'}-deferred`} title="Deferred" count={sections.deferred.length} colorClass="text-gray-600" defaultCollapsed={true}>
+                                            <TaskSection key={`${viewMode}-${selectedProject?.recordName ?? 'all'}-deferred`} title="Deferred" count={sections.deferred.length} colorClass="text-gray-600">
                                                 {renderTaskList(sections.deferred)}
                                             </TaskSection>
                                         </div>
@@ -3387,7 +3388,7 @@ function ProjectsList() {
                                             onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
                                             onDrop={handleDropSomeday}
                                         >
-                                            <TaskSection key={`${viewMode}-${selectedProject?.recordName ?? 'all'}-someday`} title="Someday / Maybe" count={sections.someday.length} colorClass="text-[#92400e]" defaultCollapsed={true}>
+                                            <TaskSection key={`${viewMode}-${selectedProject?.recordName ?? 'all'}-someday`} title="Someday / Maybe" count={sections.someday.length} colorClass="text-[#92400e]">
                                                 {renderTaskList(sections.someday)}
                                             </TaskSection>
                                         </div>
