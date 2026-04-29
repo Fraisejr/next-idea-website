@@ -136,22 +136,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 setTimeout(() => searchInputRef.current?.focus(), 50);
             }
 
-            // ESC to close search
+            // ESC to close search — single press clears query and closes bar
             if (e.key === 'Escape' && isSearchOpen) {
-                if (searchQuery) {
-                    setSearchQuery(''); // First ESC clears query
-                } else {
-                    setIsSearchOpen(false); // Second ESC closes bar
-                    // If we closed bar, we should probably clear query too if we want to reset? 
-                    // User requirement: "close the search bar while maintaining the filtering"
-                    // So we do NOT clear query on close if it has value.
-                    // Wait, if I press ESC and query is empty, I close.
-                    // If query has text, user logic: "close the search bar while maintaining the filtering".
-                    // Typical behavior: ESC clears. 
-                    // Let's rely on the requirement: "close the search bar while maintaining the filtering"
-                    // So: ESC -> Close Bar (keep query). 
-                    // BUT: "show a button next to the Search button to clear the filter"
-                }
+                setSearchQuery('');
+                setIsSearchOpen(false);
             }
         };
 
@@ -197,7 +185,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             }}
                             autoFocus
                         />
-                        <button onClick={() => setIsSearchOpen(false)} className="text-gray-400 hover:text-gray-600">
+                        <button onClick={() => { setSearchQuery(''); setIsSearchOpen(false); }} className="text-gray-400 hover:text-gray-600">
                             <X className="w-4 h-4" />
                         </button>
                     </div>
