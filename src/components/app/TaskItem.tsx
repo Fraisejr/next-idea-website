@@ -175,7 +175,12 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                             onChange={(e) => setEditTaskName(e.target.value)}
                             className="flex-1 text-sm rounded border-gray-300 px-2 py-1"
                             autoFocus
-                            onBlur={() => { if (!cancelledRef.current) onSave(task); cancelledRef.current = false; }}
+                            onBlur={() => {
+                                // If the window lost focus (user switched app/window), don't exit editing
+                                if (!document.hasFocus()) return;
+                                if (!cancelledRef.current) onSave(task);
+                                cancelledRef.current = false;
+                            }}
                             onKeyDown={(e) => {
                                 if (e.key === 'Enter') onSave(task);
                                 if (e.key === 'Escape') { cancelledRef.current = true; onCancel(); }

@@ -166,7 +166,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     };
 
     return (
-        <div className="w-[28rem] bg-gray-50 border-r border-gray-100 flex flex-col fixed md:relative h-full z-10 transition-transform md:translate-x-0 -translate-x-full">
+        <div className="w-[36rem] bg-gray-50 border-r border-gray-100 flex flex-col fixed md:relative h-full z-10 transition-transform md:translate-x-0 -translate-x-full">
             <div className="p-4 border-b border-gray-100 bg-white flex items-center justify-between h-[60px]">
                 {isSearchOpen ? (
                     <div className="flex items-center w-full gap-2 animate-in fade-in slide-in-from-left-2 duration-200">
