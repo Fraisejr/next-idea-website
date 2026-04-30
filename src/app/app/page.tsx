@@ -573,26 +573,57 @@ function ProjectsList() {
         const privateDB = container.privateCloudDatabase;
         const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
 
-        const cdmrRecords = tagIds.map(tagId => ({
-            recordName: crypto.randomUUID(),
-            recordType: 'CDMR',
-            fields: {
-                CD_entityNames: { value: 'CD_Tag:CD_Task' },
-                CD_recordNames: { value: `${tagId}:${taskRecordName}` }
-            }
-        }));
+        const cdmrRecords = tagIds.map(tagId => {
+            const recordName = crypto.randomUUID();
+            return {
+                recordName,
+                recordID: { recordName, zoneID },  // explicitly place in Core Data zone
+                recordType: 'CDMR',
+                fields: {
+                    CD_entityNames: { value: 'CD_Tag:CD_Task' },
+                    CD_recordNames: { value: `${tagId}:${taskRecordName}` }
+                }
+            };
+        });
 
         try {
             const result = await privateDB.saveRecords(cdmrRecords, { zoneID });
             if (result.hasErrors) throw new Error(result.errors[0].message);
-            // Optimistically update local taskTagMap
+
+            console.log('[Tags] Saved CDMR records:', result.records.map((r: any) => ({
+                recordName: r.recordName,
+                zoneID: r.recordID?.zoneID ?? r.zoneID ?? JSON.stringify(r).slice(0, 200),
+            })));
+
+            // Optimistically update local taskTagMap (deduplicate to avoid duplicate keys)
             setTaskTagMap(prev => ({
                 ...prev,
-                [taskRecordName]: [...(prev[taskRecordName] || []), ...tagIds]
+                [taskRecordName]: [...new Set([...(prev[taskRecordName] || []), ...tagIds])]
             }));
         } catch (e) {
             console.error('[Tags] Failed to save CDMR relationships:', e);
         }
+    };
+
+    // Build CDMR records for a task-tag relationship to include in a saveRecords batch.
+    // Format must match NSPersistentCloudKitContainer expectations:
+    //   CD_entityNames: alphabetically sorted bare entity names (e.g. "Tag:Task")
+    //   CD_relationships: relationship property names matching entity order (e.g. "tasks:tags")
+    //   CD_recordNames: record IDs matching entity order (e.g. "tagId:taskId")
+    const buildCdmrRecords = (taskRecordName: string, tagIds: string[]) => {
+        const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
+        return tagIds.map(tagId => {
+            const recordName = crypto.randomUUID();
+            return {
+                recordName,
+                recordType: 'CDMR',
+                fields: {
+                    CD_entityNames: { value: 'Tag:Task' },
+                    CD_relationships: { value: 'tasks:tags' },
+                    CD_recordNames: { value: `${tagId}:${taskRecordName}` }
+                }
+            };
+        });
     };
 
     const handleTaskSave = async (task: TaskRecord) => {
@@ -632,7 +663,13 @@ function ProjectsList() {
                 };
 
 
-                const saveResult = await privateDB.saveRecords([newRecord], { zoneID });
+                // Read and clear pending tags
+                const tagIds = pendingTagIdsRef.current;
+                pendingTagIdsRef.current = [];
+
+                // Build CDMR records and save them in the SAME batch as the task
+                const cdmrRecords = buildCdmrRecords(recordName, tagIds);
+                const saveResult = await privateDB.saveRecords([newRecord, ...cdmrRecords], { zoneID });
 
                 if (saveResult.hasErrors) {
                     console.error('[CloudKit Sync] Failed to save new task:', saveResult.errors);
@@ -641,11 +678,12 @@ function ProjectsList() {
 
                 const savedRecord = saveResult.records[0];
 
-                // Create tag relationships if any were picked via @
-                const tagIds = pendingTagIdsRef.current;
-                pendingTagIdsRef.current = [];
+                // Optimistically update taskTagMap for the new tags
                 if (tagIds.length > 0) {
-                    await createTagRelationships(savedRecord.recordName, tagIds);
+                    setTaskTagMap(prev => ({
+                        ...prev,
+                        [recordName]: [...new Set([...(prev[recordName] || []), ...tagIds])]
+                    }));
                 }
 
 
@@ -685,18 +723,24 @@ function ProjectsList() {
                 fullRecord.fields.CD_project = { value: task.fields.CD_project.value };
             }
 
-            // 3. Save
-            const saveResult = await privateDB.saveRecords([fullRecord], { zoneID });
+            // Read and clear pending tags, then save task + CDMRs in one batch
+            const tagIds = pendingTagIdsRef.current;
+            pendingTagIdsRef.current = [];
+            const cdmrRecords = buildCdmrRecords(task.recordName, tagIds);
+
+            // 3. Save task + CDMR records atomically
+            const saveResult = await privateDB.saveRecords([fullRecord, ...cdmrRecords], { zoneID });
             if (saveResult.hasErrors) throw new Error(saveResult.errors[0].message);
 
             // Success: Update local state
             const savedRecord = saveResult.records[0];
 
-            // Create tag relationships if any were picked via @ for existing task
-            const tagIds = pendingTagIdsRef.current;
-            pendingTagIdsRef.current = [];
+            // Optimistically update taskTagMap for the new tags
             if (tagIds.length > 0) {
-                await createTagRelationships(savedRecord.recordName, tagIds);
+                setTaskTagMap(prev => ({
+                    ...prev,
+                    [savedRecord.recordName]: [...new Set([...(prev[savedRecord.recordName] || []), ...tagIds])]
+                }));
             }
 
             setTasks(prev => prev.map(t =>
@@ -1407,7 +1451,7 @@ function ProjectsList() {
                 const records = result.records;
 
 
-                // Format confirmed: { CD_entityNames: "CD_Tag:CD_Task", CD_recordNames: "tagId:taskId" }
+                // Format: CD_entityNames "Tag:Task", CD_relationships "tasks:tags", CD_recordNames "tagId:taskId"
 
 
                 // Map task record names to their array of tag record names

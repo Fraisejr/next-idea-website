@@ -279,7 +279,8 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                                     } else if (tagPickerQuery !== null) {
                                         const filtered = tags.filter(t =>
                                             t.fields.CD_name.value.toLowerCase().includes(tagPickerQuery.toLowerCase()) &&
-                                            !pendingTagIds.includes(t.recordName)
+                                            !pendingTagIds.includes(t.recordName) &&
+                                            !(taskTagMap[task.recordName] || []).includes(t.recordName)
                                         );
                                         if (e.key === 'ArrowDown') { e.preventDefault(); setTagPickerIndex(i => Math.min(i + 1, filtered.length - 1)); return; }
                                         if (e.key === 'ArrowUp') { e.preventDefault(); setTagPickerIndex(i => Math.max(i - 1, 0)); return; }
@@ -348,7 +349,8 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                             {tagPickerQuery !== null && (() => {
                                 const filtered = tags.filter(t =>
                                     t.fields.CD_name.value.toLowerCase().includes(tagPickerQuery.toLowerCase()) &&
-                                    !pendingTagIds.includes(t.recordName)
+                                    !pendingTagIds.includes(t.recordName) &&
+                                    !(taskTagMap[task.recordName] || []).includes(t.recordName)
                                 );
                                 return filtered.length > 0 ? (
                                     <div className="absolute top-full left-0 mt-1 z-50 bg-white border border-gray-200 rounded-xl shadow-lg min-w-[200px] py-1 overflow-hidden">
