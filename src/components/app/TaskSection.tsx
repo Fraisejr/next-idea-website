@@ -75,7 +75,7 @@ export const TaskSection: React.FC<TaskSectionProps> = ({
                 ref={contentRef}
                 style={{
                     height: height !== undefined ? `${height}px` : undefined,
-                    overflow: 'hidden',
+                    overflow: height !== undefined ? 'hidden' : 'visible',
                     transition: 'height 220ms ease-in-out',
                 }}
                 onTransitionEnd={handleTransitionEnd}

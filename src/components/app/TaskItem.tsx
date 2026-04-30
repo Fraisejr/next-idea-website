@@ -14,7 +14,8 @@ import {
     ExternalLink,
     ArrowUpToLine,
     ArrowDownToLine,
-    AlignLeft
+    AlignLeft,
+    FolderOpen
 } from 'lucide-react';
 import React from 'react';
 
@@ -82,6 +83,12 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     const [localNote, setLocalNote] = React.useState(task.fields.CD_note?.value || '');
     const noteDebounceTimerRef = React.useRef<NodeJS.Timeout | null>(null);
 
+    // Project picker state
+    const [projectPickerQuery, setProjectPickerQuery] = React.useState<string | null>(null);
+    const [projectPickerIndex, setProjectPickerIndex] = React.useState(0);
+    const [pendingProjectId, setPendingProjectId] = React.useState<string | null>(null);
+    const inputRef = React.useRef<HTMLInputElement>(null);
+
     React.useEffect(() => {
         setLocalNote(task.fields.CD_note?.value || '');
     }, [task.fields.CD_note?.value]);
@@ -146,8 +153,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                 onDragLeave();
             }}
             onDrop={(e) => onDrop(e, task)}
-            className={`relative group p-3 bg-white border border-gray-100 rounded-xl hover:shadow-sm transition-all flex items-center gap-3 ${canDrag ? 'cursor-grab active:cursor-grabbing' : 'opacity-75'
-                }`}
+            className={`relative group p-3 bg-white border border-gray-100 rounded-xl hover:shadow-sm transition-all flex items-center gap-3 ${canDrag ? 'cursor-grab active:cursor-grabbing' : (editingTaskId === task.recordName ? '' : 'opacity-75')} ${editingTaskId === task.recordName ? 'z-20' : ''}`}
         >
             {dragOverTaskId === task.recordName && (!dragOverPosition || dragOverPosition === 'top') && (
                 <div className="absolute -top-[2px] left-0 right-0 h-1 bg-blue-500 rounded-full z-10 pointer-events-none" />
@@ -170,26 +176,123 @@ export const TaskItem: React.FC<TaskItemProps> = ({
 
             <div className="flex-1 min-w-0" onClick={() => onEditClick(task)}>
                 {editingTaskId === task.recordName ? (
-                    <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                        <input
-                            type="text"
-                            value={editTaskName}
-                            onChange={(e) => setEditTaskName(e.target.value)}
-                            className="flex-1 text-sm rounded border-gray-300 px-2 py-1"
-                            autoFocus
-                            onBlur={() => {
-                                // If the window lost focus (user switched app/window), don't exit editing
-                                if (!document.hasFocus()) return;
-                                if (!cancelledRef.current) onSave(task);
-                                cancelledRef.current = false;
-                            }}
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter') onSave(task);
-                                if (e.key === 'Escape') { cancelledRef.current = true; onCancel(); }
-                            }}
-                        />
-                        <button onMouseDown={(e) => e.preventDefault()} onClick={() => onSave(task)} className="text-green-600 p-1 hover:bg-green-50 rounded"><Check className="w-4 h-4" /></button>
-                        <button onMouseDown={(e) => { e.preventDefault(); cancelledRef.current = true; }} onClick={() => onCancel()} className="text-red-600 p-1 hover:bg-red-50 rounded"><X className="w-4 h-4" /></button>
+                    <div className="flex flex-col gap-1" onClick={(e) => e.stopPropagation()}>
+                        {/* Project badge if selected via picker */}
+                        {(() => {
+                            const pickedProject = projects.find(p => p.recordName === (pendingProjectId ?? task.fields.CD_project?.value));
+                            return pickedProject && projectPickerQuery === null ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-md w-fit"
+                                    style={{
+                                        backgroundColor: pickedProject.fields.CD_color?.value ? `${pickedProject.fields.CD_color.value}20` : '#e5e7eb',
+                                        color: pickedProject.fields.CD_color?.value || '#6b7280'
+                                    }}
+                                >
+                                    <SFSymbolMapper symbol={pickedProject.fields.CD_icon?.value} color={pickedProject.fields.CD_color?.value} size={11} />
+                                    {pickedProject.fields.CD_name?.value}
+                                </span>
+                            ) : null;
+                        })()}
+                        <div className="flex items-center gap-2 relative">
+                            <input
+                                ref={inputRef}
+                                type="text"
+                                value={editTaskName}
+                                onChange={(e) => {
+                                    const val = e.target.value;
+                                    setEditTaskName(val);
+                                    // Detect & trigger
+                                    const ampIdx = val.lastIndexOf('&');
+                                    if (ampIdx !== -1) {
+                                        setProjectPickerQuery(val.slice(ampIdx + 1));
+                                        setProjectPickerIndex(0);
+                                    } else {
+                                        setProjectPickerQuery(null);
+                                    }
+                                }}
+                                className="flex-1 text-sm rounded border-gray-300 px-2 py-1"
+                                autoFocus
+                                onBlur={() => {
+                                    // If the window lost focus (user switched app/window), don't exit editing
+                                    if (!document.hasFocus()) return;
+                                    // Delay so project-picker clicks can fire first
+                                    setTimeout(() => {
+                                        if (!cancelledRef.current && !projectPickerQuery) {
+                                            const taskToSave = pendingProjectId
+                                                ? { ...task, fields: { ...task.fields, CD_project: { value: pendingProjectId } } }
+                                                : task;
+                                            onSave(taskToSave);
+                                        }
+                                        cancelledRef.current = false;
+                                    }, 150);
+                                }}
+                                onKeyDown={(e) => {
+                                    if (projectPickerQuery !== null) {
+                                        const filtered = projects.filter(p =>
+                                            p.fields.CD_name?.value.toLowerCase().includes(projectPickerQuery.toLowerCase())
+                                        );
+                                        if (e.key === 'ArrowDown') { e.preventDefault(); setProjectPickerIndex(i => Math.min(i + 1, filtered.length - 1)); return; }
+                                        if (e.key === 'ArrowUp') { e.preventDefault(); setProjectPickerIndex(i => Math.max(i - 1, 0)); return; }
+                                        if (e.key === 'Enter' && filtered.length > 0) {
+                                            e.preventDefault();
+                                            const chosen = filtered[projectPickerIndex] || filtered[0];
+                                            const ampIdx = editTaskName.lastIndexOf('&');
+                                            const cleanName = editTaskName.slice(0, ampIdx).trimEnd();
+                                            setEditTaskName(cleanName);
+                                            setProjectPickerQuery(null);
+                                            setPendingProjectId(chosen.recordName);
+                                            return;
+                                        }
+                                        if (e.key === 'Escape') { setProjectPickerQuery(null); return; }
+                                    } else {
+                                        if (e.key === 'Enter') {
+                                            const taskToSave = pendingProjectId
+                                                ? { ...task, fields: { ...task.fields, CD_project: { value: pendingProjectId } } }
+                                                : task;
+                                            onSave(taskToSave);
+                                        }
+                                        if (e.key === 'Escape') { cancelledRef.current = true; onCancel(); }
+                                    }
+                                }}
+                            />
+                            <button onMouseDown={(e) => e.preventDefault()} onClick={() => {
+                                const taskToSave = pendingProjectId
+                                    ? { ...task, fields: { ...task.fields, CD_project: { value: pendingProjectId } } }
+                                    : task;
+                                onSave(taskToSave);
+                            }} className="text-green-600 p-1 hover:bg-green-50 rounded"><Check className="w-4 h-4" /></button>
+                            <button onMouseDown={(e) => { e.preventDefault(); cancelledRef.current = true; }} onClick={() => { setProjectPickerQuery(null); onCancel(); }} className="text-red-600 p-1 hover:bg-red-50 rounded"><X className="w-4 h-4" /></button>
+
+                            {/* Project Picker Dropdown */}
+                            {projectPickerQuery !== null && (() => {
+                                const filtered = projects.filter(p =>
+                                    p.fields.CD_name?.value.toLowerCase().includes(projectPickerQuery.toLowerCase())
+                                );
+                                return filtered.length > 0 ? (
+                                    <div className="absolute top-full left-0 mt-1 z-50 bg-white border border-gray-200 rounded-xl shadow-lg min-w-[220px] py-1 overflow-hidden">
+                                        {filtered.map((proj, idx) => (
+                                            <button
+                                                key={proj.recordName}
+                                                onMouseDown={(e) => {
+                                                    e.preventDefault();
+                                                    const ampIdx = editTaskName.lastIndexOf('&');
+                                                    const cleanName = editTaskName.slice(0, ampIdx).trimEnd();
+                                                    setEditTaskName(cleanName);
+                                                    setProjectPickerQuery(null);
+                                                    setPendingProjectId(proj.recordName);
+                                                    inputRef.current?.focus();
+                                                }}
+                                                className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left transition-colors ${
+                                                    idx === projectPickerIndex ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-50 text-gray-700'
+                                                }`}
+                                            >
+                                                <SFSymbolMapper symbol={proj.fields.CD_icon?.value} color={proj.fields.CD_color?.value} size={14} />
+                                                <span className="truncate">{proj.fields.CD_name?.value}</span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                ) : null;
+                            })()}
+                        </div>
                     </div>
                 ) : (
                     <div className="flex flex-col w-full relative cursor-pointer">

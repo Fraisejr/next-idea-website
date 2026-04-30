@@ -635,9 +635,13 @@ function ProjectsList() {
 
             const fullRecord = fetchResult.records[0];
 
-            // 2. Update field
+            // 2. Update fields
             fullRecord.fields.CD_name = { value: editTaskName };
             fullRecord.fields.CD_modifieddate = { value: Date.now() }; // Update modified date
+            // Sync project — covers the case where the & picker reassigned it
+            if (task.fields.CD_project?.value) {
+                fullRecord.fields.CD_project = { value: task.fields.CD_project.value };
+            }
 
             // 3. Save
             const saveResult = await privateDB.saveRecords([fullRecord], { zoneID });
