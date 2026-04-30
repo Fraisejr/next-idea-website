@@ -3735,7 +3735,7 @@ function ProjectsList() {
                                             <kbd className="px-3 py-1 bg-white border border-gray-300 rounded shadow-sm font-mono text-sm">Shift + N</kbd>
                                         </div>
                                         <div className="flex justify-between items-center py-2 px-3 bg-gray-50 rounded-lg">
-                                            <span className="text-gray-700">Select a project inline while typing a task name</span>
+                                            <span className="text-gray-700">Select a project while typing a task name</span>
                                             <kbd className="px-3 py-1 bg-white border border-gray-300 rounded shadow-sm font-mono text-sm">&</kbd>
                                         </div>
                                         <div className="flex justify-between items-center py-2 px-3 bg-gray-50 rounded-lg">
