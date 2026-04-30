@@ -399,55 +399,47 @@ function ProjectsList() {
     const handleSave = async (project: ProjectRecord) => {
         if (!editName.trim() || !container) return;
 
+        const previousName = project.fields.CD_name?.value || '';
+
+        // Optimistic: reflect the new name immediately and close the editor.
+        setProjects(prev => prev.map(p =>
+            p.recordName === project.recordName
+                ? { ...p, fields: { ...p.fields, CD_name: { value: editName } } }
+                : p
+        ));
+        setEditingId(null);
+        setEditName('');
+
+        // Persist in the background — any error reverts the optimistic state.
         try {
             const privateDB = container.privateCloudDatabase;
             const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
-            const recordID = {
-                recordName: project.recordName,
-                zoneID: zoneID
-            };
 
-            // 1. Fetch the full record to ensure we don't overwrite unseen fields
-            // We typically need to pass the Record ID object correctly for custom zones
-            // FIX: Must pass zoneID in the options object (second arg) for custom zones!
             const fetchResult = await privateDB.fetchRecords([project.recordName], { zoneID });
-
-            if (fetchResult.hasErrors) {
-                // Fallback: if fetching by ID logic fails (CloudKit JS ID structure is tricky), 
-                // we might try just saving the partial with merge? 
-                // But let's assume fetch works if ID is correct.
-                throw new Error(fetchResult.errors[0].message);
-            }
+            if (fetchResult.hasErrors) throw new Error(fetchResult.errors[0].message);
 
             const fullRecord = fetchResult.records[0];
-
-            // 2. Update the field
             fullRecord.fields.CD_name = { value: editName };
 
-            // 3. Save
             const saveResult = await privateDB.saveRecords([fullRecord], { zoneID });
-            if (saveResult.hasErrors) {
-                throw new Error(saveResult.errors[0].message);
-            }
+            if (saveResult.hasErrors) throw new Error(saveResult.errors[0].message);
 
-            // Success: Update local state with the new name
-            // We keep our local partial fields but update the name and change tag
+            // Update recordChangeTag with the authoritative value from CloudKit.
             const savedRecord = saveResult.records[0];
             setProjects(prev => prev.map(p =>
-                p.recordName === savedRecord.recordName ?
-                    {
-                        ...p,
-                        fields: { ...p.fields, CD_name: { value: editName } },
-                        recordChangeTag: savedRecord.recordChangeTag
-                    } : p
+                p.recordName === savedRecord.recordName
+                    ? { ...p, recordChangeTag: savedRecord.recordChangeTag }
+                    : p
             ));
-
-            setEditingId(null);
-            setEditName('');
 
         } catch (err: any) {
             console.error('Save error:', err);
-            alert('Failed to save changes: ' + err.message);
+            setProjects(prev => prev.map(p =>
+                p.recordName === project.recordName
+                    ? { ...p, fields: { ...p.fields, CD_name: { value: previousName } } }
+                    : p
+            ));
+            alert('Failed to save changes — the name has been reverted.');
         }
     };
 
@@ -709,58 +701,66 @@ function ProjectsList() {
             }
 
             // Handle Existing Task Update
-            // 1. Fetch full record
-            const fetchResult = await privateDB.fetchRecords([task.recordName], { zoneID });
-            if (fetchResult.hasErrors) throw new Error(fetchResult.errors[0].message);
 
-            const fullRecord = fetchResult.records[0];
+            // Snapshot the old name so we can revert if the save fails.
+            const previousName = task.fields.CD_name?.value || '';
 
-            // 2. Update fields
-            fullRecord.fields.CD_name = { value: editTaskName };
-            fullRecord.fields.CD_modifieddate = { value: Date.now() }; // Update modified date
-            // Sync project — covers the case where the & picker reassigned it
-            if (task.fields.CD_project?.value) {
-                fullRecord.fields.CD_project = { value: task.fields.CD_project.value };
-            }
-
-            // Read and clear pending tags, then save task + CDMRs in one batch
+            // Read and clear pending tags synchronously — must happen before any await
+            // so a concurrent edit can't clobber pendingTagIdsRef.
             const tagIds = pendingTagIdsRef.current;
             pendingTagIdsRef.current = [];
-            const cdmrRecords = buildCdmrRecords(task.recordName, tagIds);
 
-            // 3. Save task + CDMR records atomically
-            const saveResult = await privateDB.saveRecords([fullRecord, ...cdmrRecords], { zoneID });
-            if (saveResult.hasErrors) throw new Error(saveResult.errors[0].message);
-
-            // Success: Update local state
-            const savedRecord = saveResult.records[0];
-
-            // Optimistically update taskTagMap for the new tags
+            // Optimistic: reflect the new name immediately and close the editor.
+            // Both tasks state AND allTasksCache must be updated together — any effect
+            // that rebuilds tasks from the cache (e.g. on view switch) would otherwise
+            // flash the old name for one render before the cache catches up.
+            const optimisticTask = {
+                ...task,
+                fields: { ...task.fields, CD_name: { value: editTaskName }, CD_modifieddate: { value: Date.now() } }
+            };
+            setTasks(prev => prev.map(t => t.recordName === task.recordName ? optimisticTask : t));
+            upsertTaskInCache(optimisticTask);
             if (tagIds.length > 0) {
                 setTaskTagMap(prev => ({
                     ...prev,
-                    [savedRecord.recordName]: [...new Set([...(prev[savedRecord.recordName] || []), ...tagIds])]
+                    [task.recordName]: [...new Set([...(prev[task.recordName] || []), ...tagIds])]
                 }));
             }
-
-            setTasks(prev => prev.map(t =>
-                t.recordName === savedRecord.recordName ?
-                    {
-                        ...t,
-                        fields: {
-                            ...t.fields,
-                            CD_name: { value: editTaskName },
-                            CD_modifieddate: { value: Date.now() }
-                        },
-                        recordChangeTag: savedRecord.recordChangeTag
-                    } : t
-            ));
-
-            // Add to cache to prevent flickering/reversion
-            upsertTaskInCache(savedRecord);
-
             setEditingTaskId(null);
             setEditTaskName('');
+
+            // Persist in the background — any error reverts the optimistic state.
+            try {
+                const fetchResult = await privateDB.fetchRecords([task.recordName], { zoneID });
+                if (fetchResult.hasErrors) throw new Error(fetchResult.errors[0].message);
+
+                const fullRecord = fetchResult.records[0];
+                fullRecord.fields.CD_name = { value: editTaskName };
+                fullRecord.fields.CD_modifieddate = { value: Date.now() };
+                if (task.fields.CD_project?.value) {
+                    fullRecord.fields.CD_project = { value: task.fields.CD_project.value };
+                }
+
+                const cdmrRecords = buildCdmrRecords(task.recordName, tagIds);
+                const saveResult = await privateDB.saveRecords([fullRecord, ...cdmrRecords], { zoneID });
+                if (saveResult.hasErrors) throw new Error(saveResult.errors[0].message);
+
+                // Update recordChangeTag and cache with the authoritative saved record.
+                const savedRecord = saveResult.records[0];
+                setTasks(prev => prev.map(t =>
+                    t.recordName === savedRecord.recordName
+                        ? { ...t, recordChangeTag: savedRecord.recordChangeTag }
+                        : t
+                ));
+                upsertTaskInCache(savedRecord);
+
+            } catch (err: any) {
+                console.error('Save task error:', err);
+                const revertedTask = { ...task, fields: { ...task.fields, CD_name: { value: previousName } } };
+                setTasks(prev => prev.map(t => t.recordName === task.recordName ? revertedTask : t));
+                upsertTaskInCache(revertedTask);
+                alert('Failed to save task — the name has been reverted.');
+            }
 
         } catch (err: any) {
             console.error('Save task error:', err);
@@ -2847,11 +2847,9 @@ function ProjectsList() {
         // STANDARD TOGGLE LOGIC (Non-recurring or Un-completing)
 
         // Update Local State array
-        setTasks(prev => prev.map(t =>
-            t.recordName === task.recordName
-                ? { ...t, fields: { ...t.fields, CD_completed: { value: isCompleting ? 1 : 0 } } }
-                : t
-        ));
+        const optimisticCompletion = { ...task, fields: { ...task.fields, CD_completed: { value: isCompleting ? 1 : 0 } } };
+        setTasks(prev => prev.map(t => t.recordName === task.recordName ? optimisticCompletion : t));
+        upsertTaskInCache(optimisticCompletion);
 
         // Persist
         try {
@@ -2893,6 +2891,7 @@ function ProjectsList() {
                     ? { ...t, fields: { ...t.fields, CD_completed: task.fields.CD_completed } }
                     : t
             ));
+            upsertTaskInCache({ ...task, fields: { ...task.fields, CD_completed: task.fields.CD_completed } });
         }
     };
 
