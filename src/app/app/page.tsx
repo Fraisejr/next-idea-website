@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect, useState, useMemo, useRef } from 'react';
+import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { CloudKitProvider, useCloudKit } from '@/components/CloudKitProvider';
 import Navbar from '@/components/Navbar';
 import Footer from '@/components/Footer';
-import { ProjectRecord, TaskRecord, TagRecord } from '@/lib/cloudkit';
+import { ProjectRecord, TaskRecord, TagRecord, CLOUDKIT_ENV } from '@/lib/cloudkit';
 import { TaskItem } from '@/components/app/TaskItem';
 import { Sidebar } from '@/components/app/Sidebar';
 import { TaskSection } from '@/components/app/TaskSection';
@@ -1444,111 +1444,76 @@ function ProjectsList() {
     }, [container, isAuthenticated, cacheInitialized]);
 
     // Fetch Task-Tag Relationships using CDMR Discovery
-    useEffect(() => {
-        const fetchTaskTagRelations = async () => {
-            if (!container) return;
+    const fetchTaskTagRelations = useCallback(async () => {
+        if (!container) return;
 
+        const privateDB = container.privateCloudDatabase;
+        const options = { zoneID: { zoneName: 'com.apple.coredata.cloudkit.zone' } };
 
-
-            const privateDB = container.privateCloudDatabase;
-            const options = { zoneID: { zoneName: 'com.apple.coredata.cloudkit.zone' } };
-
-            // Now that 'CD_entityNames' is Sortable, we can sort by it to fetch all records.
-            // Using 'recordName' gave 'Unknown field' error, likely because it's a system field 
-            // not exposed in the same way for sorting in JS API without special handling.
-            const query = {
-                recordType: 'CDMR',
-                sortBy: [{
-                    fieldName: 'CD_entityNames',
-                    ascending: true
-                }],
-                resultsLimit: 500
-            };
-
-            try {
-                // console.log('[CloudKit Relations] Executing query:', query);
-                const result = await privateDB.performQuery(query, options);
-
-                if (result.hasErrors) {
-                    console.error('[CloudKit Relations] ❌ Error fetching CDMR records:', result.errors[0]);
-                    return;
-                }
-
-                const records = result.records;
-
-
-                // Format: CD_entityNames "Tag:Task", CD_relationships "tasks:tags", CD_recordNames "tagId:taskId"
-
-
-                // Map task record names to their array of tag record names
-                const mapping: Record<string, string[]> = {};
-
-                records.forEach((rel: any) => {
-                    const fields = rel.fields;
-
-                    // CDMR Generic Fields (CD_entityNames, CD_recordNames)
-                    // CD_entityNames example: "MyTag:Tag:MyTask:Task" (It's a concatenated string of EntityName:EntityID?)
-                    // Actually, usually it's "Entity1:Entity2"
-                    // and CD_recordNames is "UUID1:UUID2"
-                    if (fields.CD_entityNames && fields.CD_recordNames) {
-                        const entities = fields.CD_entityNames.value;
-                        const recordNames = fields.CD_recordNames.value;
-
-                        // console.log(`[CloudKit Relations] Processing: entities="${entities}", names="${recordNames}"`);
-
-                        if (entities.includes('Task') && entities.includes('Tag')) {
-                            const entityParts = entities.split(':');
-                            const recordParts = recordNames.split(':');
-
-                            let taskRef = '';
-                            let tagRef = '';
-
-                            // The parts logic can be tricky depending on order.
-                            // Core Data usually sorts them alphabetically by entity name or something?
-                            // Let's look for "Task" substring in entityParts to find index.
-
-                            entityParts.forEach((part: string, index: number) => {
-                                if (part.includes('Task')) taskRef = recordParts[index];
-                                if (part.includes('Tag')) tagRef = recordParts[index];
-                            });
-
-                            if (taskRef && tagRef) {
-                                if (!mapping[taskRef]) mapping[taskRef] = [];
-                                mapping[taskRef].push(tagRef);
-                            }
-                        }
-                    }
-                });
-
-
-                setTaskTagMap(mapping);
-
-            } catch (err) {
-                console.error('[CloudKit Relations] ❌ Unexpected error:', err);
-            }
+        const query = {
+            recordType: 'CDMR',
+            sortBy: [{ fieldName: 'CD_entityNames', ascending: true }],
+            resultsLimit: 500
         };
 
-        if (isAuthenticated) {
-            fetchTaskTagRelations();
+        try {
+            const result = await privateDB.performQuery(query, options);
+
+            if (result.hasErrors) {
+                console.error('[CloudKit Relations] ❌ Error fetching CDMR records:', result.errors[0]);
+                return;
+            }
+
+            const mapping: Record<string, string[]> = {};
+
+            result.records.forEach((rel: any) => {
+                const fields = rel.fields;
+                if (fields.CD_entityNames && fields.CD_recordNames) {
+                    const entities = fields.CD_entityNames.value;
+                    const recordNames = fields.CD_recordNames.value;
+
+                    if (entities.includes('Task') && entities.includes('Tag')) {
+                        const entityParts = entities.split(':');
+                        const recordParts = recordNames.split(':');
+                        let taskRef = '', tagRef = '';
+                        entityParts.forEach((part: string, index: number) => {
+                            if (part.includes('Task')) taskRef = recordParts[index];
+                            if (part.includes('Tag')) tagRef = recordParts[index];
+                        });
+                        if (taskRef && tagRef) {
+                            if (!mapping[taskRef]) mapping[taskRef] = [];
+                            mapping[taskRef].push(tagRef);
+                        }
+                    }
+                }
+            });
+
+            setTaskTagMap(mapping);
+        } catch (err) {
+            console.error('[CloudKit Relations] ❌ Unexpected error:', err);
         }
-    }, [isAuthenticated, container]);
+    }, [container]);
+
+    useEffect(() => {
+        if (isAuthenticated) fetchTaskTagRelations();
+    }, [isAuthenticated, container, fetchTaskTagRelations]);
 
     // ── Background Sync ────────────────────────────────────────────────────
-    // Every 15s, query for tasks modified since the last successful sync.
-    // Uses the same performQuery API as the initial cache load — proven to work.
+    // Driven by CloudKit push notifications (silent data-change pushes via APNs).
+    // Falls back to a 5-minute poll and also syncs whenever the tab becomes visible.
     useEffect(() => {
         if (!container || !isAuthenticated || !cacheInitialized) return;
-        if (editingTaskId || editingId) return;
 
         const privateDB = container.privateCloudDatabase;
         const ZONE_ID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
 
-        // Track the last sync time in a ref so the interval always reads the latest value
-        // Initialize to "now minus one interval" so the first run fetches recent changes
+        // Track the last sync time in a ref so callbacks always read the latest value.
+        // Initialize to "now minus one interval" so the first run fetches recent changes.
         const lastSyncTimeRef = { current: Date.now() - CACHE_REFRESH_INTERVAL };
 
         const fetchChanges = async () => {
             if (document.hidden) return;
+            if (editingTaskId || editingId) return;
 
             const since = lastSyncTimeRef.current;
             console.log(`[Sync] 🔄 Checking for changes since ${new Date(since).toLocaleTimeString()}...`);
@@ -1602,6 +1567,9 @@ function ProjectsList() {
                             });
                             return next;
                         });
+                        // Re-fetch tag associations — CDMR records have no modifieddate,
+                        // so we refresh the full mapping whenever any task changes.
+                        fetchTaskTagRelations();
                     }
                 }
 
@@ -1648,14 +1616,86 @@ function ProjectsList() {
             }
         };
 
-        const intervalId = setInterval(fetchChanges, CACHE_REFRESH_INTERVAL);
+        // ── CloudKit push subscriptions ───────────────────────────────────
+        // Subscriptions are keyed by ID — CloudKit updates them if they exist, so
+        // calling this on every effect run is safe (idempotent).
+        const setupPushNotifications = async () => {
+            if (!('serviceWorker' in navigator)) return;
+            if (CLOUDKIT_ENV !== 'development') {
+                console.log('[Sync] Push subscriptions skipped (production container does not support web subscriptions)');
+                return;
+            }
+            try {
+                await container.registerForNotifications();
+                const result = await privateDB.saveSubscriptions([
+                    {
+                        subscriptionType: 'query',
+                        subscriptionID: 'next-idea-task-changes-v1',
+                        zoneID: ZONE_ID,
+                        query: { recordType: 'CD_Task' },
+                        firesOn: ['create', 'update', 'delete'],
+                        firesOnce: false,
+                        notificationInfo: { shouldSendContentAvailable: true },
+                    },
+                    {
+                        subscriptionType: 'query',
+                        subscriptionID: 'next-idea-project-changes-v1',
+                        zoneID: ZONE_ID,
+                        query: { recordType: 'CD_Project' },
+                        firesOn: ['create', 'update', 'delete'],
+                        firesOnce: false,
+                        notificationInfo: { shouldSendContentAvailable: true },
+                    },
+                ]);
+                if (!result.hasErrors) {
+                    console.log('[Sync] ✅ CloudKit push subscriptions active');
+                } else {
+                    console.warn('[Sync] Subscription save errors:', result.errors);
+                }
+            } catch (err) {
+                console.warn('[Sync] Push notification setup failed (fallback polling active):', err);
+            }
+        };
+        setupPushNotifications();
+
+        // ── Sync triggers ─────────────────────────────────────────────────
+        // 1. Service worker forwards push events from Apple as a window message.
+        const handlePushMessage = (event: MessageEvent) => {
+            if (event.data?.type === 'CLOUDKIT_PUSH') {
+                console.log('[Sync] 🔔 Push received — syncing');
+                fetchChanges();
+            }
+        };
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.addEventListener('message', handlePushMessage);
+        }
+
+        // 2. Sync immediately whenever the tab becomes visible (catches changes
+        //    made on another device while this tab was in the background).
+        const handleVisibilityChange = () => {
+            if (!document.hidden) {
+                console.log('[Sync] 👁 Tab visible — syncing');
+                fetchChanges();
+            }
+        };
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+
+        // 3. Thirty-second fallback poll — covers push-delivery failures and
+        //    browsers that block push notifications entirely.
+        const FALLBACK_INTERVAL = 30 * 1000;
+        const intervalId = setInterval(fetchChanges, FALLBACK_INTERVAL);
         const initialRun = setTimeout(fetchChanges, 1000);
+
         return () => {
             clearInterval(intervalId);
             clearTimeout(initialRun);
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.removeEventListener('message', handlePushMessage);
+            }
         };
 
-    }, [container, isAuthenticated, cacheInitialized, editingTaskId, editingId]);
+    }, [container, isAuthenticated, cacheInitialized, editingTaskId, editingId, fetchTaskTagRelations]);
 
 
     // Drag and Drop Handlers

@@ -67,6 +67,12 @@ export function CloudKitProvider({ children }: { children: ReactNode }) {
                 if (!ckContainer) throw new Error('Failed to get default container');
                 setContainer(ckContainer);
 
+                if ('serviceWorker' in navigator) {
+                    navigator.serviceWorker.register('/sw.js').catch(err =>
+                        console.warn('[CloudKit] Service worker registration failed:', err)
+                    );
+                }
+
                 ckContainer.whenUserSignsIn().then((userIdentity: any) => {
                     setIsAuthenticated(true);
                     setCurrentUser(userIdentity);
