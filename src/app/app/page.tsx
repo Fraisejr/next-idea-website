@@ -78,6 +78,8 @@ function ProjectsList() {
     const detailsSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const noteDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [taskTagMap, setTaskTagMap] = useState<Record<string, string[]>>({});
+    // Holds tag IDs chosen via the @ picker, bridging TaskItem's onTagsAdd → handleTaskSave
+    const pendingTagIdsRef = useRef<string[]>([]);
 
     // Search State
     const [searchQuery, setSearchQuery] = useState('');
@@ -560,6 +562,39 @@ function ProjectsList() {
         }
     };
 
+    // Called from TaskItem when @ picker selects tags. Stores them in ref for handleTaskSave.
+    const handleTagsAdd = (task: TaskRecord, tagIds: string[]) => {
+        pendingTagIdsRef.current = tagIds;
+    };
+
+    // Creates CDMR relationship records for each tag, then updates local taskTagMap.
+    const createTagRelationships = async (taskRecordName: string, tagIds: string[]) => {
+        if (!container || tagIds.length === 0) return;
+        const privateDB = container.privateCloudDatabase;
+        const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
+
+        const cdmrRecords = tagIds.map(tagId => ({
+            recordName: crypto.randomUUID(),
+            recordType: 'CDMR',
+            fields: {
+                CD_entityNames: { value: 'CD_Tag:CD_Task' },
+                CD_recordNames: { value: `${tagId}:${taskRecordName}` }
+            }
+        }));
+
+        try {
+            const result = await privateDB.saveRecords(cdmrRecords, { zoneID });
+            if (result.hasErrors) throw new Error(result.errors[0].message);
+            // Optimistically update local taskTagMap
+            setTaskTagMap(prev => ({
+                ...prev,
+                [taskRecordName]: [...(prev[taskRecordName] || []), ...tagIds]
+            }));
+        } catch (e) {
+            console.error('[Tags] Failed to save CDMR relationships:', e);
+        }
+    };
+
     const handleTaskSave = async (task: TaskRecord) => {
         if (!editTaskName.trim() || !container) return;
 
@@ -606,6 +641,13 @@ function ProjectsList() {
 
                 const savedRecord = saveResult.records[0];
 
+                // Create tag relationships if any were picked via @
+                const tagIds = pendingTagIdsRef.current;
+                pendingTagIdsRef.current = [];
+                if (tagIds.length > 0) {
+                    await createTagRelationships(savedRecord.recordName, tagIds);
+                }
+
 
                 // Replace temp task with real one
                 setTasks(prev => prev.map(t =>
@@ -649,6 +691,14 @@ function ProjectsList() {
 
             // Success: Update local state
             const savedRecord = saveResult.records[0];
+
+            // Create tag relationships if any were picked via @ for existing task
+            const tagIds = pendingTagIdsRef.current;
+            pendingTagIdsRef.current = [];
+            if (tagIds.length > 0) {
+                await createTagRelationships(savedRecord.recordName, tagIds);
+            }
+
             setTasks(prev => prev.map(t =>
                 t.recordName === savedRecord.recordName ?
                     {
@@ -1357,9 +1407,8 @@ function ProjectsList() {
                 const records = result.records;
 
 
-                if (records.length > 0) {
-                    // console.log('[CloudKit Relations] Sample Record:', records[0]);
-                }
+                // Format confirmed: { CD_entityNames: "CD_Tag:CD_Task", CD_recordNames: "tagId:taskId" }
+
 
                 // Map task record names to their array of tag record names
                 const mapping: Record<string, string[]> = {};
@@ -3113,6 +3162,7 @@ function ProjectsList() {
                         onMoveToTop={handleMoveToTop}
                         onMoveToBottom={handleMoveToBottom}
                         onNoteChange={handleTaskNoteChange}
+                        onTagsAdd={handleTagsAdd}
                     />
                 ))}
             </div>

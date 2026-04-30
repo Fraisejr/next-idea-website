@@ -46,6 +46,7 @@ type TaskItemProps = {
     onMoveToTop?: (task: TaskRecord) => void;
     onMoveToBottom?: (task: TaskRecord) => void;
     onNoteChange?: (task: TaskRecord, newNote: string) => void;
+    onTagsAdd?: (task: TaskRecord, tagIds: string[]) => void;
 };
 
 export const TaskItem: React.FC<TaskItemProps> = ({
@@ -72,7 +73,8 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     onEditClick,
     onMoveToTop,
     onMoveToBottom,
-    onNoteChange
+    onNoteChange,
+    onTagsAdd
 }) => {
 
     // Track whether the user cancelled editing (Escape / ✗ button)
@@ -87,6 +89,12 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     const [projectPickerQuery, setProjectPickerQuery] = React.useState<string | null>(null);
     const [projectPickerIndex, setProjectPickerIndex] = React.useState(0);
     const [pendingProjectId, setPendingProjectId] = React.useState<string | null>(null);
+
+    // Tag picker state
+    const [tagPickerQuery, setTagPickerQuery] = React.useState<string | null>(null);
+    const [tagPickerIndex, setTagPickerIndex] = React.useState(0);
+    const [pendingTagIds, setPendingTagIds] = React.useState<string[]>([]);
+
     const inputRef = React.useRef<HTMLInputElement>(null);
 
     React.useEffect(() => {
@@ -177,20 +185,40 @@ export const TaskItem: React.FC<TaskItemProps> = ({
             <div className="flex-1 min-w-0" onClick={() => onEditClick(task)}>
                 {editingTaskId === task.recordName ? (
                     <div className="flex flex-col gap-1" onClick={(e) => e.stopPropagation()}>
-                        {/* Project badge if selected via picker */}
+                        {/* Pickers meta row: project badge + pending tag badges */}
                         {(() => {
                             const pickedProject = projects.find(p => p.recordName === (pendingProjectId ?? task.fields.CD_project?.value));
-                            return pickedProject && projectPickerQuery === null ? (
-                                <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-md w-fit"
-                                    style={{
-                                        backgroundColor: pickedProject.fields.CD_color?.value ? `${pickedProject.fields.CD_color.value}20` : '#e5e7eb',
-                                        color: pickedProject.fields.CD_color?.value || '#6b7280'
-                                    }}
-                                >
-                                    <SFSymbolMapper symbol={pickedProject.fields.CD_icon?.value} color={pickedProject.fields.CD_color?.value} size={11} />
-                                    {pickedProject.fields.CD_name?.value}
-                                </span>
-                            ) : null;
+                            const pendingTags = pendingTagIds.map(id => tags.find(t => t.recordName === id)).filter(Boolean) as TagRecord[];
+                            if (!pickedProject && pendingTags.length === 0) return null;
+                            return (
+                                <div className="flex items-center gap-1 flex-wrap">
+                                    {pickedProject && projectPickerQuery === null && (
+                                        <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-md"
+                                            style={{
+                                                backgroundColor: pickedProject.fields.CD_color?.value ? `${pickedProject.fields.CD_color.value}20` : '#e5e7eb',
+                                                color: pickedProject.fields.CD_color?.value || '#6b7280'
+                                            }}
+                                        >
+                                            <SFSymbolMapper symbol={pickedProject.fields.CD_icon?.value} color={pickedProject.fields.CD_color?.value} size={11} />
+                                            {pickedProject.fields.CD_name?.value}
+                                        </span>
+                                    )}
+                                    {pendingTags.map(tag => (
+                                        <span
+                                            key={tag.recordName}
+                                            className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-md cursor-pointer"
+                                            style={{
+                                                backgroundColor: tag.fields.CD_color?.value ? `${tag.fields.CD_color.value}20` : '#e5e7eb',
+                                                color: tag.fields.CD_color?.value || '#6b7280'
+                                            }}
+                                            onClick={() => setPendingTagIds(prev => prev.filter(id => id !== tag.recordName))}
+                                            title="Click to remove"
+                                        >
+                                            #{tag.fields.CD_name.value} ×
+                                        </span>
+                                    ))}
+                                </div>
+                            );
                         })()}
                         <div className="flex items-center gap-2 relative">
                             <input
@@ -200,26 +228,32 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                                 onChange={(e) => {
                                     const val = e.target.value;
                                     setEditTaskName(val);
-                                    // Detect & trigger
+                                    // Detect active trigger: whichever of & or @ appears last
                                     const ampIdx = val.lastIndexOf('&');
-                                    if (ampIdx !== -1) {
+                                    const atIdx = val.lastIndexOf('@');
+                                    if (atIdx > ampIdx && atIdx !== -1) {
+                                        setTagPickerQuery(val.slice(atIdx + 1));
+                                        setTagPickerIndex(0);
+                                        setProjectPickerQuery(null);
+                                    } else if (ampIdx !== -1) {
                                         setProjectPickerQuery(val.slice(ampIdx + 1));
                                         setProjectPickerIndex(0);
+                                        setTagPickerQuery(null);
                                     } else {
                                         setProjectPickerQuery(null);
+                                        setTagPickerQuery(null);
                                     }
                                 }}
                                 className="flex-1 text-sm rounded border-gray-300 px-2 py-1"
                                 autoFocus
                                 onBlur={() => {
-                                    // If the window lost focus (user switched app/window), don't exit editing
                                     if (!document.hasFocus()) return;
-                                    // Delay so project-picker clicks can fire first
                                     setTimeout(() => {
-                                        if (!cancelledRef.current && !projectPickerQuery) {
+                                        if (!cancelledRef.current && !projectPickerQuery && !tagPickerQuery) {
                                             const taskToSave = pendingProjectId
                                                 ? { ...task, fields: { ...task.fields, CD_project: { value: pendingProjectId } } }
                                                 : task;
+                                            if (pendingTagIds.length > 0) onTagsAdd?.(taskToSave, pendingTagIds);
                                             onSave(taskToSave);
                                         }
                                         cancelledRef.current = false;
@@ -236,18 +270,35 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                                             e.preventDefault();
                                             const chosen = filtered[projectPickerIndex] || filtered[0];
                                             const ampIdx = editTaskName.lastIndexOf('&');
-                                            const cleanName = editTaskName.slice(0, ampIdx).trimEnd();
-                                            setEditTaskName(cleanName);
+                                            setEditTaskName(editTaskName.slice(0, ampIdx).trimEnd());
                                             setProjectPickerQuery(null);
                                             setPendingProjectId(chosen.recordName);
                                             return;
                                         }
                                         if (e.key === 'Escape') { setProjectPickerQuery(null); return; }
+                                    } else if (tagPickerQuery !== null) {
+                                        const filtered = tags.filter(t =>
+                                            t.fields.CD_name.value.toLowerCase().includes(tagPickerQuery.toLowerCase()) &&
+                                            !pendingTagIds.includes(t.recordName)
+                                        );
+                                        if (e.key === 'ArrowDown') { e.preventDefault(); setTagPickerIndex(i => Math.min(i + 1, filtered.length - 1)); return; }
+                                        if (e.key === 'ArrowUp') { e.preventDefault(); setTagPickerIndex(i => Math.max(i - 1, 0)); return; }
+                                        if (e.key === 'Enter' && filtered.length > 0) {
+                                            e.preventDefault();
+                                            const chosen = filtered[tagPickerIndex] || filtered[0];
+                                            const atIdx = editTaskName.lastIndexOf('@');
+                                            setEditTaskName(editTaskName.slice(0, atIdx).trimEnd());
+                                            setTagPickerQuery(null);
+                                            setPendingTagIds(prev => [...prev, chosen.recordName]);
+                                            return;
+                                        }
+                                        if (e.key === 'Escape') { setTagPickerQuery(null); return; }
                                     } else {
                                         if (e.key === 'Enter') {
                                             const taskToSave = pendingProjectId
                                                 ? { ...task, fields: { ...task.fields, CD_project: { value: pendingProjectId } } }
                                                 : task;
+                                            if (pendingTagIds.length > 0) onTagsAdd?.(taskToSave, pendingTagIds);
                                             onSave(taskToSave);
                                         }
                                         if (e.key === 'Escape') { cancelledRef.current = true; onCancel(); }
@@ -258,9 +309,10 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                                 const taskToSave = pendingProjectId
                                     ? { ...task, fields: { ...task.fields, CD_project: { value: pendingProjectId } } }
                                     : task;
+                                if (pendingTagIds.length > 0) onTagsAdd?.(taskToSave, pendingTagIds);
                                 onSave(taskToSave);
                             }} className="text-green-600 p-1 hover:bg-green-50 rounded"><Check className="w-4 h-4" /></button>
-                            <button onMouseDown={(e) => { e.preventDefault(); cancelledRef.current = true; }} onClick={() => { setProjectPickerQuery(null); onCancel(); }} className="text-red-600 p-1 hover:bg-red-50 rounded"><X className="w-4 h-4" /></button>
+                            <button onMouseDown={(e) => { e.preventDefault(); cancelledRef.current = true; }} onClick={() => { setProjectPickerQuery(null); setTagPickerQuery(null); onCancel(); }} className="text-red-600 p-1 hover:bg-red-50 rounded"><X className="w-4 h-4" /></button>
 
                             {/* Project Picker Dropdown */}
                             {projectPickerQuery !== null && (() => {
@@ -275,8 +327,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                                                 onMouseDown={(e) => {
                                                     e.preventDefault();
                                                     const ampIdx = editTaskName.lastIndexOf('&');
-                                                    const cleanName = editTaskName.slice(0, ampIdx).trimEnd();
-                                                    setEditTaskName(cleanName);
+                                                    setEditTaskName(editTaskName.slice(0, ampIdx).trimEnd());
                                                     setProjectPickerQuery(null);
                                                     setPendingProjectId(proj.recordName);
                                                     inputRef.current?.focus();
@@ -287,6 +338,40 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                                             >
                                                 <SFSymbolMapper symbol={proj.fields.CD_icon?.value} color={proj.fields.CD_color?.value} size={14} />
                                                 <span className="truncate">{proj.fields.CD_name?.value}</span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                ) : null;
+                            })()}
+
+                            {/* Tag Picker Dropdown */}
+                            {tagPickerQuery !== null && (() => {
+                                const filtered = tags.filter(t =>
+                                    t.fields.CD_name.value.toLowerCase().includes(tagPickerQuery.toLowerCase()) &&
+                                    !pendingTagIds.includes(t.recordName)
+                                );
+                                return filtered.length > 0 ? (
+                                    <div className="absolute top-full left-0 mt-1 z-50 bg-white border border-gray-200 rounded-xl shadow-lg min-w-[200px] py-1 overflow-hidden">
+                                        {filtered.map((tag, idx) => (
+                                            <button
+                                                key={tag.recordName}
+                                                onMouseDown={(e) => {
+                                                    e.preventDefault();
+                                                    const atIdx = editTaskName.lastIndexOf('@');
+                                                    setEditTaskName(editTaskName.slice(0, atIdx).trimEnd());
+                                                    setTagPickerQuery(null);
+                                                    setPendingTagIds(prev => [...prev, tag.recordName]);
+                                                    inputRef.current?.focus();
+                                                }}
+                                                className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left transition-colors ${
+                                                    idx === tagPickerIndex ? 'bg-purple-50 text-purple-700' : 'hover:bg-gray-50 text-gray-700'
+                                                }`}
+                                            >
+                                                <span
+                                                    className="w-2 h-2 rounded-full flex-shrink-0"
+                                                    style={{ backgroundColor: tag.fields.CD_color?.value || '#9ca3af' }}
+                                                />
+                                                <span className="truncate">#{tag.fields.CD_name.value}</span>
                                             </button>
                                         ))}
                                     </div>
