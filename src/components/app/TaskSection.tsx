@@ -29,19 +29,26 @@ export const TaskSection: React.FC<TaskSectionProps> = ({
 
         if (isCollapsed) {
             // Animate from current height → 0
-            setHeight(el.scrollHeight);
-            requestAnimationFrame(() => {
-                requestAnimationFrame(() => setHeight(0));
-            });
+            if (height === undefined) {
+                 setHeight(el.scrollHeight);
+                 requestAnimationFrame(() => {
+                     requestAnimationFrame(() => setHeight(0));
+                 });
+            } else {
+                 setHeight(0);
+            }
         } else {
             // Animate from 0 → natural height
-            setHeight(el.scrollHeight);
+            if (height !== undefined) {
+                 setHeight(el.scrollHeight);
+            }
         }
     }, [isCollapsed, children]);
 
     // After expand animation finishes, unset the fixed height so content can grow naturally
-    const handleTransitionEnd = () => {
-        if (!isCollapsed) {
+    const handleTransitionEnd = (e: React.TransitionEvent) => {
+        // Ensure we are only responding to the height transition of the container
+        if (e.target === contentRef.current && e.propertyName === 'height' && !isCollapsed) {
             setHeight(undefined);
         }
     };

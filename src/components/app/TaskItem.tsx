@@ -132,6 +132,8 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     // Helper to determine if we should show actions
     const showActions = (viewMode === 'project' || viewMode === 'all_tasks' || viewMode === 'inbox' || viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'waiting' || viewMode === 'deferred' || viewMode === 'due');
 
+    const hasNote = localNote.trim().length > 0;
+
     return (
         <div
             draggable={canDrag}
@@ -243,6 +245,14 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                                     )}
 
                                     <button
+                                        onClick={(e) => { e.stopPropagation(); setIsNoteExpanded(!isNoteExpanded); }}
+                                        className="p-1.5 text-yellow-600 bg-yellow-50 hover:bg-yellow-100 rounded-lg ml-0.5 cursor-pointer"
+                                        title={!hasNote ? "Add Note" : (isNoteExpanded ? "Hide Note" : "Show Note")}
+                                    >
+                                        <AlignLeft className="w-4 h-4" />
+                                    </button>
+
+                                    <button
                                         onClick={(e) => { e.stopPropagation(); onTaskClick(task); }}
                                         className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg ml-0.5 cursor-pointer"
                                         title="Task Details"
@@ -302,7 +312,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                         )}
 
                         {/* Note Expansion */}
-                        {task.fields.CD_note?.value && task.fields.CD_note.value.trim().length > 0 && (
+                        {(hasNote || isNoteExpanded) && (
                             <div className="w-full mt-2" onClick={(e) => e.stopPropagation()}>
                                 <button
                                     onClick={(e) => { e.stopPropagation(); setIsNoteExpanded(!isNoteExpanded); }}
@@ -314,6 +324,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                                 {isNoteExpanded && (
                                     <div className="mt-1.5 w-full">
                                         <textarea
+                                            autoFocus={!hasNote}
                                             value={localNote}
                                             onChange={(e) => setLocalNote(e.target.value)}
                                             onClick={(e) => e.stopPropagation()}

@@ -10,7 +10,6 @@ import { Sidebar } from '@/components/app/Sidebar';
 import { TaskSection } from '@/components/app/TaskSection';
 import { SFSymbolMapper } from '@/components/SFSymbolMapper';
 import { Loader2, ListTodo, CheckCircle2, Pencil, Check, X, ClipboardList, Plus, Clock, RotateCcw, Calendar, Hourglass, Repeat, Moon, ChevronRight, Zap, Inbox, Keyboard, CalendarClock, CalendarDays, Tag, Trash2 } from 'lucide-react';
-import { useAutoAnimate } from '@formkit/auto-animate/react';
 
 const getTaskSection = (task: TaskRecord) => {
     if (task.fields.CD_completed?.value === 1) return 'completed';
@@ -90,7 +89,7 @@ function ProjectsList() {
     // Refresh State
     const [isRefreshing, setIsRefreshing] = useState(false);
 
-    const [animationParent] = useAutoAnimate();
+
 
     // Sync link/note input when selected task changes
     useEffect(() => {
@@ -3082,7 +3081,7 @@ function ProjectsList() {
         });
 
         return (
-            <div ref={animationParent}>
+            <div>
                 {filteredTasks.map(task => (
                     <TaskItem
                         key={task.recordName}
