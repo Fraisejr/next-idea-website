@@ -1269,6 +1269,32 @@ function ProjectsList() {
             console.error('Failed to complete project:', err);
         }
     };
+    const handleDeleteTask = async () => {
+        if (!selectedTaskDetails || !container) return;
+        if (!window.confirm(`Delete "${selectedTaskDetails.fields.CD_name?.value}"? This cannot be undone.`)) return;
+        
+        const taskId = selectedTaskDetails.recordName;
+        try {
+            const privateDB = container.privateCloudDatabase;
+            const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
+            
+            // Delete the task record
+            await privateDB.deleteRecords([{ recordName: taskId }], { zoneID });
+            
+            // Update local state
+            setTasks(prev => prev.filter(t => t.recordName !== taskId));
+            
+            // Clear from cache
+            removeTaskFromCache(taskId);
+            
+            // Close panel
+            setSelectedTaskDetails(null);
+        } catch (err) {
+            console.error('Failed to delete task:', err);
+            alert('Failed to delete task. Please try again.');
+        }
+    };
+
 
     const handleDeleteProject = async () => {
         if (!selectedProjectDetails || !container) return;
@@ -3708,6 +3734,14 @@ function ProjectsList() {
                                             <span className="text-gray-700">Create task at the bottom</span>
                                             <kbd className="px-3 py-1 bg-white border border-gray-300 rounded shadow-sm font-mono text-sm">Shift + N</kbd>
                                         </div>
+                                        <div className="flex justify-between items-center py-2 px-3 bg-gray-50 rounded-lg">
+                                            <span className="text-gray-700">Select a project inline while typing a task name</span>
+                                            <kbd className="px-3 py-1 bg-white border border-gray-300 rounded shadow-sm font-mono text-sm">&</kbd>
+                                        </div>
+                                        <div className="flex justify-between items-center py-2 px-3 bg-gray-50 rounded-lg">
+                                            <span className="text-gray-700">Select one or several tags while typing a task name</span>
+                                            <kbd className="px-3 py-1 bg-white border border-gray-300 rounded shadow-sm font-mono text-sm">@</kbd>
+                                        </div>
                                     </div>
                                 </div>
 
@@ -4022,9 +4056,16 @@ function ProjectsList() {
                                     </div>
                                 </div>
                             </div>
-
-
-
+                            {/* Delete Task Button */}
+                            <div className="px-6 py-4 border-t border-gray-100">
+                                <button
+                                    onClick={handleDeleteTask}
+                                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 rounded-lg text-sm font-medium transition-colors"
+                                >
+                                    <Trash2 className="w-4 h-4" />
+                                    Delete Task
+                                </button>
+                            </div>
 
 
                             {/* Footer info */}
