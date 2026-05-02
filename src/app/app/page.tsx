@@ -2705,6 +2705,7 @@ function ProjectsList() {
                     next.delete(task.recordName);
                     return next;
                 });
+                upsertTaskInCache(optimisticCompletion);
             }, 1000);
         }
 
@@ -2849,7 +2850,11 @@ function ProjectsList() {
         // Update Local State array
         const optimisticCompletion = { ...task, fields: { ...task.fields, CD_completed: { value: isCompleting ? 1 : 0 } } };
         setTasks(prev => prev.map(t => t.recordName === task.recordName ? optimisticCompletion : t));
-        upsertTaskInCache(optimisticCompletion);
+        // For completing tasks with animation, defer the cache update to the setTimeout so
+        // the sidebar count only changes after the task disappears. For un-completing, update immediately.
+        if (!isCompleting || viewMode === 'history') {
+            upsertTaskInCache(optimisticCompletion);
+        }
 
         // Persist
         try {
@@ -3272,6 +3277,7 @@ function ProjectsList() {
                         onMoveToBottom={handleMoveToBottom}
                         onNoteChange={handleTaskNoteChange}
                         onTagsAdd={handleTagsAdd}
+                        isCompleting={completingTaskIds.has(task.recordName)}
                     />
                 ))}
             </div>
