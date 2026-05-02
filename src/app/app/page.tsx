@@ -3354,8 +3354,10 @@ function ProjectsList() {
             const savedRecord = result.records[0];
             const finalTask = { ...updatedTask, recordChangeTag: savedRecord.recordChangeTag };
 
-            setSelectedTaskDetails(finalTask);
+            // Only update the panel if the user hasn't closed it since this save was started
+            setSelectedTaskDetails(prev => prev?.recordName === finalTask.recordName ? finalTask : prev);
             setTasks(prev => prev.map(t => t.recordName === finalTask.recordName ? finalTask : t));
+            upsertTaskInCache(finalTask);
 
             // Show 'saved' for 2 seconds then return to idle
             setDetailsSaveState('saved');
