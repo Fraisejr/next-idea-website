@@ -11,6 +11,15 @@ import { TaskSection } from '@/components/app/TaskSection';
 import { SFSymbolMapper } from '@/components/SFSymbolMapper';
 import { Loader2, ListTodo, CheckCircle2, Pencil, Check, X, ClipboardList, Plus, Clock, RotateCcw, Calendar, Hourglass, Repeat, Moon, ChevronRight, Zap, Inbox, Keyboard, CalendarClock, CalendarDays, Tag, Trash2 } from 'lucide-react';
 
+const REVIEW_ITEMS: { id: string; label: string; view: 'inbox' | 'next_actions' | 'waiting' | 'someday' | null }[] = [
+    { id: 'collect', label: 'Collect ideas', view: null },
+    { id: 'inbox', label: 'Empty your inbox', view: 'inbox' },
+    { id: 'next', label: 'Review your next actions', view: 'next_actions' },
+    { id: 'waiting', label: 'Review your waiting for list', view: 'waiting' },
+    { id: 'projects', label: 'Review your project list', view: null },
+    { id: 'someday', label: 'Review your someday list', view: 'someday' },
+];
+
 const getTaskSection = (task: TaskRecord) => {
     if (task.fields.CD_completed?.value === 1) return 'completed';
     if (task.fields.CD_waitingfor?.value === 1) return 'waitingFor';
@@ -65,8 +74,18 @@ function ProjectsList() {
     const [taskError, setTaskError] = useState<string | null>(null);
 
     // View Mode
-    const [viewMode, setViewMode] = useState<'project' | 'history' | 'inbox' | 'next_actions' | 'someday' | 'due' | 'waiting' | 'deferred' | 'all_tasks'>('next_actions'); // Default to next_actions
+    const [viewMode, setViewMode] = useState<'project' | 'history' | 'inbox' | 'next_actions' | 'someday' | 'due' | 'waiting' | 'deferred' | 'all_tasks' | 'review'>('next_actions'); // Default to next_actions
     const [completingTaskIds, setCompletingTaskIds] = useState<Set<string>>(new Set());
+
+    // Weekly Review State (persisted to localStorage)
+    const [reviewChecked, setReviewChecked] = useState<Record<string, boolean>>(() => {
+        if (typeof window === 'undefined') return {};
+        try { return JSON.parse(localStorage.getItem('gtd-review-checked') || '{}'); } catch { return {}; }
+    });
+    const [lastReviewDate, setLastReviewDate] = useState<number | null>(() => {
+        if (typeof window === 'undefined') return null;
+        try { const v = localStorage.getItem('gtd-review-date'); return v ? parseInt(v) : null; } catch { return null; }
+    });
 
     // Details Panel State
     const [selectedTaskDetails, setSelectedTaskDetails] = useState<TaskRecord | null>(null);
@@ -1367,6 +1386,21 @@ function ProjectsList() {
                 })();
             }
         }
+    };
+
+    // ========== WEEKLY REVIEW ==========
+    const handleReviewItemClick = (id: string) => {
+        const newChecked = { ...reviewChecked, [id]: !reviewChecked[id] };
+        setReviewChecked(newChecked);
+        localStorage.setItem('gtd-review-checked', JSON.stringify(newChecked));
+    };
+
+    const handleFinishReview = () => {
+        setReviewChecked({});
+        const now = Date.now();
+        setLastReviewDate(now);
+        localStorage.setItem('gtd-review-checked', '{}');
+        localStorage.setItem('gtd-review-date', String(now));
     };
 
     // ========== CACHE INITIALIZATION & REFRESH ==========
@@ -3506,6 +3540,7 @@ function ProjectsList() {
                 isRefreshing={isRefreshing}
                 onMoveDueToTop={handleMoveDueToTop}
                 onInfoClick={setSelectedProjectDetails}
+                lastReviewDate={lastReviewDate}
             />
             {/* Main Content: Tasks */}
             <div className="flex-1 flex flex-col overflow-hidden bg-white">
@@ -3521,7 +3556,8 @@ function ProjectsList() {
                                                 : viewMode === 'someday' ? 'Someday / Maybe'
                                                     : viewMode === 'due' ? 'Due and Overdue'
                                                         : viewMode === 'all_tasks' ? 'All tasks'
-                                                            : 'Completed Tasks'
+                                                            : viewMode === 'review' ? 'Review tasks'
+                                                                : 'Completed Tasks'
                             }
                         </h1>
                         {(viewMode === 'project' && selectedProject || viewMode === 'inbox' || viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due' || viewMode === 'waiting' || viewMode === 'deferred' || viewMode === 'all_tasks') && (
@@ -3637,7 +3673,59 @@ function ProjectsList() {
                 )}
 
                 <div className="flex-1 overflow-y-auto p-6">
-                    {loadingTasks ? (
+                    {viewMode === 'review' ? (
+                        <div className="max-w-lg mx-auto pt-4">
+                            {lastReviewDate && (
+                                <p className="text-sm text-gray-400 mb-6">
+                                    Last completed: {new Date(lastReviewDate).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}
+                                </p>
+                            )}
+                            <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden shadow-sm">
+                                <div className="px-5 py-4 border-b border-gray-100">
+                                    <h2 className="font-semibold text-gray-900">Review checklist</h2>
+                                </div>
+                                <div className="divide-y divide-gray-50">
+                                    {REVIEW_ITEMS.map((item) => {
+                                        const checked = !!reviewChecked[item.id];
+                                        return (
+                                            <div
+                                                key={item.id}
+                                                className="flex items-center gap-4 px-5 py-3.5 hover:bg-gray-50 transition-colors group"
+                                            >
+                                                <div
+                                                    onClick={() => handleReviewItemClick(item.id)}
+                                                    className={`w-5 h-5 rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-colors cursor-pointer ${checked ? 'bg-green-500 border-green-500' : 'border-gray-300 hover:border-green-400'}`}
+                                                >
+                                                    {checked && <Check className="w-3 h-3 text-white" />}
+                                                </div>
+                                                {item.view ? (
+                                                    <span
+                                                        onClick={() => { setViewMode(item.view!); setSelectedProject(null); }}
+                                                        className={`flex-1 transition-colors cursor-pointer ${checked ? 'line-through text-gray-400' : 'text-gray-800 hover:text-violet-600'}`}
+                                                    >
+                                                        {item.label}
+                                                    </span>
+                                                ) : (
+                                                    <span className={`flex-1 transition-colors ${checked ? 'line-through text-gray-400' : 'text-gray-800'}`}>
+                                                        {item.label}
+                                                    </span>
+                                                )}
+                                                {item.view && !checked && (
+                                                    <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-gray-400 transition-colors" />
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                            <button
+                                onClick={handleFinishReview}
+                                className="mt-5 w-full py-2.5 bg-green-500 hover:bg-green-600 text-white font-medium rounded-xl transition-colors"
+                            >
+                                Finish review
+                            </button>
+                        </div>
+                    ) : loadingTasks ? (
                         <div className="flex justify-center p-10">
                             <Loader2 className="w-8 h-8 animate-spin text-gray-300" />
                         </div>

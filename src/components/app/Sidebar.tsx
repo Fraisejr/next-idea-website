@@ -26,9 +26,11 @@ import {
 } from 'lucide-react';
 import React from 'react';
 
+type ViewMode = 'project' | 'history' | 'inbox' | 'next_actions' | 'someday' | 'due' | 'waiting' | 'deferred' | 'all_tasks' | 'review';
+
 type SidebarProps = {
-    viewMode: 'project' | 'history' | 'inbox' | 'next_actions' | 'someday' | 'due' | 'waiting' | 'deferred' | 'all_tasks';
-    setViewMode: (mode: 'project' | 'history' | 'inbox' | 'next_actions' | 'someday' | 'due' | 'waiting' | 'deferred' | 'all_tasks') => void;
+    viewMode: ViewMode;
+    setViewMode: (mode: ViewMode) => void;
     selectedProject: ProjectRecord | null;
     setSelectedProject: (project: ProjectRecord | null) => void;
     projects: ProjectRecord[];
@@ -76,6 +78,7 @@ type SidebarProps = {
     isRefreshing: boolean;
     onMoveDueToTop: () => void;
     onInfoClick: (project: ProjectRecord) => void;
+    lastReviewDate: number | null;
 };
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -115,7 +118,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     onRefresh,
     isRefreshing,
     onMoveDueToTop,
-    onInfoClick
+    onInfoClick,
+    lastReviewDate
 }) => {
     const [isSearchOpen, setIsSearchOpen] = React.useState(false);
     const searchInputRef = React.useRef<HTMLInputElement>(null);
@@ -478,6 +482,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 {counts.someday}
                             </span>
                         ) : null}
+                    </div>
+
+                    <div
+                        onClick={() => {
+                            setViewMode('review');
+                            setSelectedProject(null);
+                        }}
+                        className={`group flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${viewMode === 'review'
+                            ? 'bg-violet-50 text-violet-700'
+                            : 'hover:bg-gray-100 text-gray-700'
+                            }`}
+                    >
+                        <ClipboardList className={`w-5 h-5 ${viewMode === 'review' ? 'text-violet-500' : 'text-gray-400'}`} />
+                        <span className="font-medium flex-1">Review tasks</span>
+                        {lastReviewDate && (
+                            <span className="text-xs text-gray-400 font-normal">
+                                {new Date(lastReviewDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                            </span>
+                        )}
                     </div>
                 </div>
 
