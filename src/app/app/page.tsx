@@ -2693,6 +2693,7 @@ function ProjectsList() {
 
         const isCompleting = task.fields.CD_completed?.value !== 1;
         const isRecurring = task.fields.CD_recurring?.value === 1;
+        const optimisticCompletion = { ...task, fields: { ...task.fields, CD_completed: { value: isCompleting ? 1 : 0 } } };
 
         // Optimistic UI updates
         // Show animation for all list views (Project, Inbox, Next Actions, Due, Waiting, Deferred, Someday)
@@ -2705,7 +2706,10 @@ function ProjectsList() {
                     next.delete(task.recordName);
                     return next;
                 });
-                upsertTaskInCache(optimisticCompletion);
+                // Recurring tasks manage their own cache state; only update here for standard tasks
+                if (!isRecurring) {
+                    upsertTaskInCache(optimisticCompletion);
+                }
             }, 1000);
         }
 
@@ -2848,7 +2852,6 @@ function ProjectsList() {
         // STANDARD TOGGLE LOGIC (Non-recurring or Un-completing)
 
         // Update Local State array
-        const optimisticCompletion = { ...task, fields: { ...task.fields, CD_completed: { value: isCompleting ? 1 : 0 } } };
         setTasks(prev => prev.map(t => t.recordName === task.recordName ? optimisticCompletion : t));
         // For completing tasks with animation, defer the cache update to the setTimeout so
         // the sidebar count only changes after the task disappears. For un-completing, update immediately.
