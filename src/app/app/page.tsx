@@ -3843,7 +3843,38 @@ function ProjectsList() {
                             loadingEvents={loadingTodayEvents}
                             googleToken={googleToken}
                             onShowSettings={() => setShowSettings(true)}
-                            onToggleComplete={handleToggleComplete}
+                            renderTask={(task) => (
+                                <TaskItem
+                                    key={task.recordName}
+                                    task={task}
+                                    viewMode="today"
+                                    editingTaskId={editingTaskId}
+                                    dragOverTaskId={dragOverTaskId}
+                                    dragOverPosition={dragOverPosition}
+                                    projects={projects}
+                                    tags={tags}
+                                    taskTagMap={taskTagMap}
+                                    editTaskName={editTaskName}
+                                    setEditTaskName={setEditTaskName}
+                                    onDragStart={() => {}}
+                                    onDragOver={() => {}}
+                                    onDragEnter={() => {}}
+                                    onDragLeave={() => {}}
+                                    onDrop={() => {}}
+                                    onToggleComplete={handleToggleComplete}
+                                    onTaskClick={handleTaskClick}
+                                    onSave={handleTaskSave}
+                                    onCancel={handleTaskCancel}
+                                    onInsertTask={handleInsertTask}
+                                    onEditClick={handleTaskEditClick}
+                                    onMoveToTop={handleMoveToTop}
+                                    onMoveToBottom={handleMoveToBottom}
+                                    onToggleToday={handleToggleToday}
+                                    onNoteChange={handleTaskNoteChange}
+                                    onTagsAdd={handleTagsAdd}
+                                    isCompleting={completingTaskIds.has(task.recordName)}
+                                />
+                            )}
                         />
                     ) : loadingTasks ? (
                         <div className="flex justify-center p-10">

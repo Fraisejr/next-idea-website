@@ -150,7 +150,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     const canDrag = (viewMode === 'project' || viewMode === 'all_tasks' || viewMode === 'inbox' || viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'waiting' || viewMode === 'deferred' || viewMode === 'due') && editingTaskId !== task.recordName;
 
     // Helper to determine if we should show actions
-    const showActions = (viewMode === 'project' || viewMode === 'all_tasks' || viewMode === 'inbox' || viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'waiting' || viewMode === 'deferred' || viewMode === 'due');
+    const showActions = (viewMode === 'project' || viewMode === 'all_tasks' || viewMode === 'inbox' || viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'waiting' || viewMode === 'deferred' || viewMode === 'due' || viewMode === 'today');
 
     const hasNote = localNote.trim().length > 0;
 
@@ -166,7 +166,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                 onDragLeave();
             }}
             onDrop={(e) => onDrop(e, task)}
-            className={`relative group p-3 bg-white border border-gray-100 rounded-xl hover:shadow-sm transition-all flex items-center gap-3 ${isCompleting ? 'opacity-40 duration-500' : ''} ${canDrag ? 'cursor-grab active:cursor-grabbing' : (editingTaskId === task.recordName ? '' : 'opacity-75')} ${editingTaskId === task.recordName ? 'z-20' : ''}`}
+            className={`relative group p-3 bg-white border border-gray-100 rounded-xl hover:shadow-sm transition-all flex items-center gap-3 ${isCompleting ? 'opacity-40 duration-500' : ''} ${canDrag ? 'cursor-grab active:cursor-grabbing' : (viewMode === 'history' ? 'opacity-75' : '')} ${editingTaskId === task.recordName ? 'z-20' : ''}`}
         >
             {dragOverTaskId === task.recordName && (!dragOverPosition || dragOverPosition === 'top') && (
                 <div className="absolute -top-[2px] left-0 right-0 h-1 bg-blue-500 rounded-full z-10 pointer-events-none" />

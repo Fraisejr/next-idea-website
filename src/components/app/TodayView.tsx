@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { Sun, Loader2, GripVertical, Check } from 'lucide-react';
+import { Sun, Loader2 } from 'lucide-react';
 import { GoogleEvent, formatEventTime } from '@/lib/google';
 import { TaskRecord } from '@/lib/cloudkit';
 
@@ -9,16 +9,11 @@ type EventItem = { type: 'event'; id: string; event: GoogleEvent };
 type TaskItem  = { type: 'task';  id: string; task: TaskRecord };
 type TodayItem = EventItem | TaskItem;
 
-// After any reorder, restore calendar events to chronological order among themselves,
-// keeping tasks in their user-chosen positions.
 function correctEventOrder(items: TodayItem[]): TodayItem[] {
     const positions: number[] = [];
     const sorted: EventItem[] = [];
     items.forEach((item, i) => {
-        if (item.type === 'event') {
-            positions.push(i);
-            sorted.push(item);
-        }
+        if (item.type === 'event') { positions.push(i); sorted.push(item); }
     });
     sorted.sort((a, b) => {
         const at = a.event.start.dateTime || a.event.start.date || '';
@@ -38,10 +33,10 @@ type Props = {
     loadingEvents: boolean;
     googleToken: string | null;
     onShowSettings: () => void;
-    onToggleComplete: (task: TaskRecord) => void;
+    renderTask: (task: TaskRecord) => React.ReactNode;
 };
 
-export function TodayView({ todayEvents, dueTodayTasks, loadingEvents, googleToken, onShowSettings, onToggleComplete }: Props) {
+export function TodayView({ todayEvents, dueTodayTasks, loadingEvents, googleToken, onShowSettings, renderTask }: Props) {
     const [order, setOrder] = useState<string[]>(() => {
         if (typeof window === 'undefined') return [];
         try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); } catch { return []; }
@@ -50,7 +45,6 @@ export function TodayView({ todayEvents, dueTodayTasks, loadingEvents, googleTok
     const [dragOverId, setDragOverId] = useState<string | null>(null);
     const [dragOverPos, setDragOverPos] = useState<'top' | 'bottom'>('bottom');
 
-    // Merge saved order with current events/tasks, append new arrivals, correct event order.
     const orderedItems = useMemo((): TodayItem[] => {
         const allItems = new Map<string, TodayItem>();
         todayEvents.forEach(e => allItems.set(e.id, { type: 'event', id: e.id, event: e }));
@@ -58,7 +52,6 @@ export function TodayView({ todayEvents, dueTodayTasks, loadingEvents, googleTok
 
         const result: TodayItem[] = [];
         const seen = new Set<string>();
-
         for (const id of order) {
             const item = allItems.get(id);
             if (item) { result.push(item); seen.add(id); }
@@ -84,26 +77,21 @@ export function TodayView({ todayEvents, dueTodayTasks, loadingEvents, googleTok
     const handleDrop = (e: React.DragEvent, targetId: string) => {
         e.preventDefault();
         if (!dragId || dragId === targetId) { setDragId(null); setDragOverId(null); return; }
-
         const ids = orderedItems.map(i => i.id);
         const newIds = [...ids];
         const fromIdx = newIds.indexOf(dragId);
         newIds.splice(fromIdx, 1);
         const toIdx = newIds.indexOf(targetId);
         newIds.splice(dragOverPos === 'top' ? toIdx : toIdx + 1, 0, dragId);
-
         saveOrder(newIds);
         setDragId(null);
         setDragOverId(null);
     };
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
     const isEmpty = orderedItems.length === 0;
 
     return (
-        <div className="max-w-lg mx-auto pt-4">
+        <div className="pt-4">
             <p className="text-sm text-gray-400 mb-5">
                 {new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}
             </p>
@@ -114,7 +102,7 @@ export function TodayView({ todayEvents, dueTodayTasks, loadingEvents, googleTok
                     {!googleToken ? (
                         <>
                             <p className="text-gray-500 mb-3">Connect Google Calendar to see today's events.</p>
-                            <button onClick={onShowSettings} className="text-sm text-blue-600 hover:underline">Open Settings</button>
+                            <button onClick={onShowSettings} className="text-sm text-blue-600 hover:underline cursor-pointer">Open Settings</button>
                         </>
                     ) : (
                         <p className="text-gray-500">Nothing due today.</p>
@@ -126,7 +114,7 @@ export function TodayView({ todayEvents, dueTodayTasks, loadingEvents, googleTok
                 </div>
             ) : (
                 <>
-                    <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden shadow-sm">
+                    <div className="space-y-2">
                         {orderedItems.map(item => {
                             const isOver = dragOverId === item.id;
                             const isDragging = dragId === item.id;
@@ -134,28 +122,27 @@ export function TodayView({ todayEvents, dueTodayTasks, loadingEvents, googleTok
                                 <div
                                     key={item.id}
                                     draggable
-                                    onDragStart={() => setDragId(item.id)}
+                                    onDragStart={(e) => {
+                                        if (item.type === 'event') e.dataTransfer.setData('today-event', item.id);
+                                        setDragId(item.id);
+                                    }}
                                     onDragEnd={() => { setDragId(null); setDragOverId(null); }}
                                     onDragOver={(e) => handleDragOver(e, item.id)}
                                     onDragLeave={(e) => {
                                         if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverId(null);
                                     }}
                                     onDrop={(e) => handleDrop(e, item.id)}
-                                    className={`relative flex items-center gap-3 px-4 py-3.5 border-b border-gray-50 last:border-0 transition-colors select-none
-                                        ${isDragging ? 'opacity-40' : ''}
-                                        ${isOver ? 'bg-blue-50/60' : 'hover:bg-gray-50'}`}
+                                    className={`relative ${isDragging ? 'opacity-40' : ''}`}
                                 >
                                     {isOver && dragOverPos === 'top' && (
-                                        <div className="absolute top-0 left-0 right-0 h-0.5 bg-blue-400 rounded-full z-10 pointer-events-none" />
+                                        <div className="absolute -top-1 left-0 right-0 h-0.5 bg-blue-400 rounded-full z-10 pointer-events-none" />
                                     )}
                                     {isOver && dragOverPos === 'bottom' && (
-                                        <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-400 rounded-full z-10 pointer-events-none" />
+                                        <div className="absolute -bottom-1 left-0 right-0 h-0.5 bg-blue-400 rounded-full z-10 pointer-events-none" />
                                     )}
 
-                                    <GripVertical className="w-3.5 h-3.5 text-gray-300 flex-shrink-0 cursor-grab" />
-
                                     {item.type === 'event' ? (
-                                        <>
+                                        <div className="relative group p-3 bg-white border border-gray-100 rounded-xl hover:shadow-sm transition-all flex items-center gap-3 cursor-grab active:cursor-grabbing select-none">
                                             <div
                                                 className="w-2.5 h-2.5 rounded-full flex-shrink-0"
                                                 style={{ backgroundColor: item.event.calendarColor }}
@@ -169,32 +156,9 @@ export function TodayView({ todayEvents, dueTodayTasks, loadingEvents, googleTok
                                                 </p>
                                             </div>
                                             <span className="text-[10px] text-gray-300 flex-shrink-0 uppercase tracking-wide">Cal</span>
-                                        </>
+                                        </div>
                                     ) : (
-                                        <>
-                                            <button
-                                                onMouseDown={e => e.stopPropagation()}
-                                                onClick={(e) => { e.stopPropagation(); onToggleComplete(item.task); }}
-                                                className="w-5 h-5 rounded-full border-2 border-gray-300 hover:border-green-400 flex items-center justify-center flex-shrink-0 transition-colors"
-                                            >
-                                                {item.task.fields.CD_completed?.value === 1 && (
-                                                    <Check className="w-3 h-3 text-green-500" />
-                                                )}
-                                            </button>
-                                            <div className="flex-1 min-w-0">
-                                                <p className={`text-sm font-medium truncate ${item.task.fields.CD_completed?.value === 1 ? 'line-through text-gray-400' : 'text-gray-900'}`}>
-                                                    {item.task.fields.CD_name?.value}
-                                                </p>
-                                                {item.task.fields.CD_date?.value != null && (
-                                                    <p className={`text-xs mt-0.5 ${item.task.fields.CD_date.value < today.getTime() ? 'text-red-400' : 'text-gray-400'}`}>
-                                                        {item.task.fields.CD_date.value < today.getTime()
-                                                            ? `Overdue · ${new Date(item.task.fields.CD_date.value).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`
-                                                            : 'Due today'}
-                                                    </p>
-                                                )}
-                                            </div>
-                                            <span className="text-[10px] text-gray-300 flex-shrink-0 uppercase tracking-wide">Task</span>
-                                        </>
+                                        renderTask(item.task)
                                     )}
                                 </div>
                             );

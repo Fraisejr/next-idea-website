@@ -171,6 +171,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
         return searchQuery.trim() && listsWithMatches.has(mode);
     };
 
+    const isCalendarEventDrag = (e: React.DragEvent) => e.dataTransfer.types.includes('today-event');
+
     const isHighlightProject = (pid: string) => {
         return searchQuery.trim() && projectsWithMatches.has(pid);
     };
@@ -299,14 +301,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             setViewMode('inbox');
                             setSelectedProject(null);
                         }}
-                        onDragOver={(e) => {
+                        onDragOver={(e) => { if (isCalendarEventDrag(e)) return;
                             e.preventDefault();
                             e.dataTransfer.dropEffect = 'move';
                             if (dragOverProjectId !== 'inbox-pseudo-project') {
                                 setDragOverProjectId('inbox-pseudo-project');
                             }
                         }}
-                        onDragEnter={(e) => {
+                        onDragEnter={(e) => { if (isCalendarEventDrag(e)) return;
                             e.preventDefault();
                             if (dragOverProjectId !== 'inbox-pseudo-project') {
                                 setDragOverProjectId('inbox-pseudo-project');
@@ -340,11 +342,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             setViewMode('due');
                             setSelectedProject(null);
                         }}
-                        onDragOver={(e) => {
+                        onDragOver={(e) => { if (isCalendarEventDrag(e)) return;
                             e.preventDefault();
                             e.dataTransfer.dropEffect = 'move';
                         }}
-                        onDragEnter={(e) => {
+                        onDragEnter={(e) => { if (isCalendarEventDrag(e)) return;
                             e.preventDefault();
                             if (dragOverProjectId !== 'due-pseudo-project') {
                                 setDragOverProjectId('due-pseudo-project');
@@ -377,11 +379,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             setViewMode('next_actions');
                             setSelectedProject(null);
                         }}
-                        onDragOver={(e) => {
+                        onDragOver={(e) => { if (isCalendarEventDrag(e)) return;
                             e.preventDefault();
                             e.dataTransfer.dropEffect = 'move';
                         }}
-                        onDragEnter={(e) => {
+                        onDragEnter={(e) => { if (isCalendarEventDrag(e)) return;
                             e.preventDefault();
                             if (dragOverProjectId !== 'next-actions-pseudo-project') {
                                 setDragOverProjectId('next-actions-pseudo-project');
@@ -415,11 +417,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             setViewMode('waiting');
                             setSelectedProject(null);
                         }}
-                        onDragOver={(e) => {
+                        onDragOver={(e) => { if (isCalendarEventDrag(e)) return;
                             e.preventDefault();
                             e.dataTransfer.dropEffect = 'move';
                         }}
-                        onDragEnter={(e) => {
+                        onDragEnter={(e) => { if (isCalendarEventDrag(e)) return;
                             e.preventDefault();
                             if (dragOverProjectId !== 'waiting-pseudo-project') {
                                 setDragOverProjectId('waiting-pseudo-project');
@@ -452,11 +454,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             setViewMode('deferred');
                             setSelectedProject(null);
                         }}
-                        onDragOver={(e) => {
+                        onDragOver={(e) => { if (isCalendarEventDrag(e)) return;
                             e.preventDefault();
                             e.dataTransfer.dropEffect = 'move';
                         }}
-                        onDragEnter={(e) => {
+                        onDragEnter={(e) => { if (isCalendarEventDrag(e)) return;
                             e.preventDefault();
                             if (dragOverProjectId !== 'deferred-pseudo-project') {
                                 setDragOverProjectId('deferred-pseudo-project');
@@ -489,11 +491,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             setViewMode('someday');
                             setSelectedProject(null);
                         }}
-                        onDragOver={(e) => {
+                        onDragOver={(e) => { if (isCalendarEventDrag(e)) return;
                             e.preventDefault();
                             e.dataTransfer.dropEffect = 'move';
                         }}
-                        onDragEnter={(e) => {
+                        onDragEnter={(e) => { if (isCalendarEventDrag(e)) return;
                             e.preventDefault();
                             if (dragOverProjectId !== 'someday-pseudo-project') {
                                 setDragOverProjectId('someday-pseudo-project');
@@ -587,7 +589,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                             setViewMode('project');
                                         }}
                                         onDragOver={(e) => onDragOver(e, project)}
-                                        onDragEnter={(e) => {
+                                        onDragEnter={(e) => { if (isCalendarEventDrag(e)) return;
                                             e.preventDefault();
                                             if (dragOverProjectId !== project.recordName) {
                                                 setDragOverProjectId(project.recordName);
@@ -701,14 +703,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                                     setSelectedProject(project);
                                                     setViewMode('project');
                                                 }}
-                                                onDragOver={(e) => {
+                                                onDragOver={(e) => { if (isCalendarEventDrag(e)) return;
                                                     e.preventDefault();
                                                     e.dataTransfer.dropEffect = 'move';
                                                     if (dragOverProjectId !== project.recordName) {
                                                         setDragOverProjectId(project.recordName);
                                                     }
                                                 }}
-                                                onDragEnter={(e) => {
+                                                onDragEnter={(e) => { if (isCalendarEventDrag(e)) return;
                                                     e.preventDefault();
                                                     if (dragOverProjectId !== project.recordName) {
                                                         setDragOverProjectId(project.recordName);
