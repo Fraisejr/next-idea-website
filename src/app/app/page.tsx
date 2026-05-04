@@ -11,7 +11,8 @@ import { TaskSection } from '@/components/app/TaskSection';
 import { SFSymbolMapper } from '@/components/SFSymbolMapper';
 import { Loader2, ListTodo, CheckCircle2, Pencil, Check, X, ClipboardList, Plus, Clock, RotateCcw, Calendar, Hourglass, Repeat, Moon, ChevronRight, Zap, Inbox, Keyboard, CalendarClock, CalendarDays, Tag, Trash2, Sun } from 'lucide-react';
 import { SettingsModal } from '@/components/app/SettingsModal';
-import { SelectedCalendar, GoogleEvent, fetchTodayEvents, formatEventTime } from '@/lib/google';
+import { TodayView } from '@/components/app/TodayView';
+import { SelectedCalendar, GoogleEvent, fetchTodayEvents } from '@/lib/google';
 
 const REVIEW_ITEMS: { id: string; label: string; view: 'inbox' | 'next_actions' | 'waiting' | 'someday' | null }[] = [
     { id: 'collect', label: 'Collect ideas', view: null },
@@ -233,6 +234,18 @@ function ProjectsList() {
 
         return counts;
     }, [allTasksCache, projects]);
+
+    // Tasks due today or overdue (used in Today view)
+    const dueTodayTasks = useMemo(() => {
+        const endOfToday = new Date();
+        endOfToday.setHours(23, 59, 59, 999);
+        return Object.values(allTasksCache).filter(task =>
+            task.fields.CD_completed?.value !== 1 &&
+            task.fields.CD_dateactive?.value === 1 &&
+            task.fields.CD_date?.value != null &&
+            task.fields.CD_date.value <= endOfToday.getTime()
+        );
+    }, [allTasksCache]);
 
     // Search Logic
     const { projectsWithMatches, listsWithMatches, matchingTaskIds } = useMemo(() => {
@@ -3641,7 +3654,7 @@ function ProjectsList() {
                 onInfoClick={setSelectedProjectDetails}
                 lastReviewDate={lastReviewDate}
                 onShowSettings={() => setShowSettings(true)}
-                todayEventCount={todayEvents.length}
+                todayEventCount={todayEvents.length + dueTodayTasks.length}
             />
             {/* Main Content: Tasks */}
             <div className="flex-1 flex flex-col overflow-hidden bg-white">
@@ -3828,51 +3841,14 @@ function ProjectsList() {
                             </button>
                         </div>
                     ) : viewMode === 'today' ? (
-                        <div className="max-w-lg mx-auto pt-4">
-                            <p className="text-sm text-gray-400 mb-5">
-                                {new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}
-                            </p>
-                            {!googleToken ? (
-                                <div className="text-center py-16 bg-gray-50 rounded-2xl border border-dashed border-gray-200">
-                                    <Sun className="w-12 h-12 text-yellow-200 mx-auto mb-4" />
-                                    <p className="text-gray-500 mb-3">Connect Google Calendar to see today's events.</p>
-                                    <button
-                                        onClick={() => setShowSettings(true)}
-                                        className="text-sm text-blue-600 hover:underline"
-                                    >
-                                        Open Settings
-                                    </button>
-                                </div>
-                            ) : loadingTodayEvents ? (
-                                <div className="flex justify-center py-16">
-                                    <Loader2 className="w-8 h-8 animate-spin text-gray-300" />
-                                </div>
-                            ) : todayEvents.length === 0 ? (
-                                <div className="text-center py-16 bg-gray-50 rounded-2xl border border-dashed border-gray-200">
-                                    <Sun className="w-12 h-12 text-yellow-200 mx-auto mb-4" />
-                                    <p className="text-gray-500">No events today.</p>
-                                </div>
-                            ) : (
-                                <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden shadow-sm divide-y divide-gray-50">
-                                    {todayEvents.map(event => (
-                                        <div key={`${event.calendarId}-${event.id}`} className="flex items-start gap-3 px-5 py-3.5">
-                                            <div
-                                                className="w-2.5 h-2.5 rounded-full flex-shrink-0 mt-1.5"
-                                                style={{ backgroundColor: event.calendarColor }}
-                                            />
-                                            <div className="flex-1 min-w-0">
-                                                <p className="text-sm font-medium text-gray-900 truncate">
-                                                    {event.summary || '(No title)'}
-                                                </p>
-                                                <p className="text-xs text-gray-400 mt-0.5">
-                                                    {formatEventTime(event)}
-                                                </p>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
+                        <TodayView
+                            todayEvents={todayEvents}
+                            dueTodayTasks={dueTodayTasks}
+                            loadingEvents={loadingTodayEvents}
+                            googleToken={googleToken}
+                            onShowSettings={() => setShowSettings(true)}
+                            onToggleComplete={handleToggleComplete}
+                        />
                     ) : loadingTasks ? (
                         <div className="flex justify-center p-10">
                             <Loader2 className="w-8 h-8 animate-spin text-gray-300" />
