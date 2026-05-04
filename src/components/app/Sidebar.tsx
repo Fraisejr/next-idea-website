@@ -327,7 +327,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             }`}
                     >
                         <Calendar className={`w-5 h-5 ${viewMode === 'due' ? 'text-green-500' : 'text-gray-400'}`} />
-                        <span className={`font-medium flex-1 ${isHighlightList('due') ? 'text-indigo-600 font-semibold' : ''}`}>Due</span>
+                        <span className={`font-medium flex-1 ${isHighlightList('due') ? 'text-indigo-600 font-semibold' : ''}`}>Due and overdue</span>
                         {counts?.due ? (
                             <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${isHighlightList('due') ? 'bg-indigo-100 text-indigo-700' : 'bg-green-100 text-green-600'}`}>
                                 {counts.due}
@@ -365,7 +365,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             }`}
                     >
                         <SquarePlay className={`w-5 h-5 ${viewMode === 'next_actions' ? 'text-blue-500' : 'text-gray-400'}`} />
-                        <span className={`font-medium flex-1 ${isHighlightList('next_actions') ? 'text-indigo-600 font-semibold' : ''}`}>Next</span>
+                        <span className={`font-medium flex-1 ${isHighlightList('next_actions') ? 'text-indigo-600 font-semibold' : ''}`}>Next actions</span>
                         {counts?.nextActions ? (
                             <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${isHighlightList('next_actions') ? 'bg-indigo-100 text-indigo-700' : 'bg-blue-100 text-blue-600'}`}>
                                 {counts.nextActions}
@@ -476,7 +476,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             }`}
                     >
                         <List className={`w-5 h-5 ${viewMode === 'someday' ? 'text-[#92400e]' : 'text-gray-400'}`} />
-                        <span className={`font-medium flex-1 ${isHighlightList('someday') ? 'text-indigo-600 font-semibold' : ''}`}>Someday</span>
+                        <span className={`font-medium flex-1 ${isHighlightList('someday') ? 'text-indigo-600 font-semibold' : ''}`}>Someday / Maybe</span>
                         {counts?.someday ? (
                             <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${isHighlightList('someday') ? 'bg-indigo-100 text-indigo-700' : 'bg-[#fdf4eb] text-[#92400e]'}`}>
                                 {counts.someday}

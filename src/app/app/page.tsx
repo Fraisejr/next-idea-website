@@ -3744,12 +3744,27 @@ function ProjectsList() {
                             ) : viewMode === 'next_actions' ? (
                                 <>
                                     <Zap className="w-12 h-12 text-purple-200 mx-auto mb-4" />
-                                    <p className="text-gray-500">No next actions available.</p>
+                                    <p className="text-gray-500">No next actions.</p>
+                                </>
+                            ) : viewMode === 'due' ? (
+                                <>
+                                    <Calendar className="w-12 h-12 text-green-200 mx-auto mb-4" />
+                                    <p className="text-gray-500">Nothing due or overdue.</p>
+                                </>
+                            ) : viewMode === 'waiting' ? (
+                                <>
+                                    <Hourglass className="w-12 h-12 text-orange-200 mx-auto mb-4" />
+                                    <p className="text-gray-500">No waiting for tasks.</p>
+                                </>
+                            ) : viewMode === 'deferred' ? (
+                                <>
+                                    <CalendarDays className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+                                    <p className="text-gray-500">No deferred tasks.</p>
                                 </>
                             ) : viewMode === 'someday' ? (
                                 <>
-                                    <CalendarClock className="w-12 h-12 text-amber-200 mx-auto mb-4" />
-                                    <p className="text-gray-500">No someday tasks.</p>
+                                    <Moon className="w-12 h-12 text-amber-200 mx-auto mb-4" />
+                                    <p className="text-gray-500">No someday / maybe tasks.</p>
                                 </>
                             ) : (
                                 <>
