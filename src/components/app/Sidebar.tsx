@@ -22,11 +22,13 @@ import {
     XCircle,
     RotateCcw,
     ArrowUpDown,
-    Info
+    Info,
+    Settings,
+    Sun,
 } from 'lucide-react';
 import React from 'react';
 
-type ViewMode = 'project' | 'history' | 'inbox' | 'next_actions' | 'someday' | 'due' | 'waiting' | 'deferred' | 'all_tasks' | 'review';
+type ViewMode = 'project' | 'history' | 'inbox' | 'next_actions' | 'someday' | 'due' | 'waiting' | 'deferred' | 'all_tasks' | 'review' | 'today';
 
 type SidebarProps = {
     viewMode: ViewMode;
@@ -79,6 +81,8 @@ type SidebarProps = {
     onMoveDueToTop: () => void;
     onInfoClick: (project: ProjectRecord) => void;
     lastReviewDate: number | null;
+    onShowSettings: () => void;
+    todayEventCount: number;
 };
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -119,7 +123,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
     isRefreshing,
     onMoveDueToTop,
     onInfoClick,
-    lastReviewDate
+    lastReviewDate,
+    onShowSettings,
+    todayEventCount,
 }) => {
     const [isSearchOpen, setIsSearchOpen] = React.useState(false);
     const searchInputRef = React.useRef<HTMLInputElement>(null);
@@ -230,6 +236,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             >
                                 <Search className="w-5 h-5" />
                             </button>
+                            <button
+                                onClick={onShowSettings}
+                                className="p-1.5 rounded-full transition-colors text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                                title="Settings"
+                            >
+                                <Settings className="w-5 h-5" />
+                            </button>
                         </div>
                     </>
                 )}
@@ -238,6 +251,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <div className="flex-1 overflow-y-auto p-2 space-y-1">
                 {/* Standard Views */}
                 <div className="space-y-1">
+                    <div
+                        onClick={() => {
+                            setViewMode('today');
+                            setSelectedProject(null);
+                        }}
+                        className={`group flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${viewMode === 'today'
+                            ? 'bg-yellow-50 text-yellow-700'
+                            : 'hover:bg-gray-100 text-gray-700'
+                            }`}
+                    >
+                        <Sun className={`w-5 h-5 ${viewMode === 'today' ? 'text-yellow-500' : 'text-gray-400'}`} />
+                        <span className="font-medium flex-1">Today</span>
+                        {todayEventCount > 0 && (
+                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${viewMode === 'today' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-600'}`}>
+                                {todayEventCount}
+                            </span>
+                        )}
+                    </div>
+
                     <div
                         onClick={() => {
                             setViewMode('all_tasks');

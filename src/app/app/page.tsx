@@ -9,7 +9,9 @@ import { TaskItem } from '@/components/app/TaskItem';
 import { Sidebar } from '@/components/app/Sidebar';
 import { TaskSection } from '@/components/app/TaskSection';
 import { SFSymbolMapper } from '@/components/SFSymbolMapper';
-import { Loader2, ListTodo, CheckCircle2, Pencil, Check, X, ClipboardList, Plus, Clock, RotateCcw, Calendar, Hourglass, Repeat, Moon, ChevronRight, Zap, Inbox, Keyboard, CalendarClock, CalendarDays, Tag, Trash2 } from 'lucide-react';
+import { Loader2, ListTodo, CheckCircle2, Pencil, Check, X, ClipboardList, Plus, Clock, RotateCcw, Calendar, Hourglass, Repeat, Moon, ChevronRight, Zap, Inbox, Keyboard, CalendarClock, CalendarDays, Tag, Trash2, Sun } from 'lucide-react';
+import { SettingsModal } from '@/components/app/SettingsModal';
+import { SelectedCalendar, GoogleEvent, fetchTodayEvents, formatEventTime } from '@/lib/google';
 
 const REVIEW_ITEMS: { id: string; label: string; view: 'inbox' | 'next_actions' | 'waiting' | 'someday' | null }[] = [
     { id: 'collect', label: 'Collect ideas', view: null },
@@ -74,7 +76,7 @@ function ProjectsList() {
     const [taskError, setTaskError] = useState<string | null>(null);
 
     // View Mode
-    const [viewMode, setViewMode] = useState<'project' | 'history' | 'inbox' | 'next_actions' | 'someday' | 'due' | 'waiting' | 'deferred' | 'all_tasks' | 'review'>('next_actions'); // Default to next_actions
+    const [viewMode, setViewMode] = useState<'project' | 'history' | 'inbox' | 'next_actions' | 'someday' | 'due' | 'waiting' | 'deferred' | 'all_tasks' | 'review' | 'today'>('next_actions'); // Default to next_actions
     const [completingTaskIds, setCompletingTaskIds] = useState<Set<string>>(new Set());
 
     // Weekly Review State (persisted to localStorage)
@@ -86,6 +88,16 @@ function ProjectsList() {
         if (typeof window === 'undefined') return null;
         try { const v = localStorage.getItem('gtd-review-date'); return v ? parseInt(v) : null; } catch { return null; }
     });
+
+    // Google Calendar State
+    const [showSettings, setShowSettings] = useState(false);
+    const [googleToken, setGoogleToken] = useState<string | null>(null);
+    const [selectedCalendars, setSelectedCalendars] = useState<SelectedCalendar[]>(() => {
+        if (typeof window === 'undefined') return [];
+        try { return JSON.parse(localStorage.getItem('google-calendars') || '[]'); } catch { return []; }
+    });
+    const [todayEvents, setTodayEvents] = useState<GoogleEvent[]>([]);
+    const [loadingTodayEvents, setLoadingTodayEvents] = useState(false);
 
     // Details Panel State
     const [selectedTaskDetails, setSelectedTaskDetails] = useState<TaskRecord | null>(null);
@@ -1402,6 +1414,40 @@ function ProjectsList() {
         localStorage.setItem('gtd-review-checked', '{}');
         localStorage.setItem('gtd-review-date', String(now));
     };
+
+    // ========== GOOGLE CALENDAR ==========
+    const handleGoogleToken = (token: string | null) => {
+        setGoogleToken(token);
+        if (!token) {
+            setTodayEvents([]);
+        }
+    };
+
+    const handleSaveCalendars = (calendars: SelectedCalendar[]) => {
+        setSelectedCalendars(calendars);
+        localStorage.setItem('google-calendars', JSON.stringify(calendars));
+    };
+
+    useEffect(() => {
+        if (!googleToken || selectedCalendars.length === 0) {
+            setTodayEvents([]);
+            return;
+        }
+        setLoadingTodayEvents(true);
+        Promise.all(selectedCalendars.map(cal => fetchTodayEvents(googleToken, cal.id, cal.color)))
+            .then(results => {
+                const all = results.flat().sort((a, b) => {
+                    const aTime = a.start.dateTime || a.start.date || '';
+                    const bTime = b.start.dateTime || b.start.date || '';
+                    return aTime.localeCompare(bTime);
+                });
+                setTodayEvents(all);
+            })
+            .catch(err => {
+                if (err.message === '401') setGoogleToken(null);
+            })
+            .finally(() => setLoadingTodayEvents(false));
+    }, [googleToken, selectedCalendars]);
 
     // ========== CACHE INITIALIZATION & REFRESH ==========
     // Initialize cache from localStorage and fetch all tasks on authentication
@@ -3261,6 +3307,58 @@ function ProjectsList() {
         }
     };
 
+    const handleToggleToday = async (task: TaskRecord) => {
+        if (!container) return;
+        const endOfToday = new Date(); endOfToday.setHours(23, 59, 59, 999);
+        const isDueToday = task.fields.CD_dateactive?.value === 1
+            && task.fields.CD_date?.value != null
+            && task.fields.CD_date.value <= endOfToday.getTime();
+
+        const newDateActive = isDueToday ? 0 : 1;
+        const newDate = Date.now();
+
+        const optimistic: TaskRecord = {
+            ...task,
+            fields: {
+                ...task.fields,
+                CD_dateactive: { value: newDateActive },
+                ...(!isDueToday ? { CD_date: { value: newDate }, CD_hideuntildate: { value: 0 } } : {}),
+            }
+        };
+        setTasks(prev => prev.map(t => t.recordName === task.recordName ? optimistic : t));
+        upsertTaskInCache(optimistic);
+
+        try {
+            const privateDB = container.privateCloudDatabase;
+            const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
+            const fetchResult = await privateDB.fetchRecords([task.recordName], { zoneID });
+            if (fetchResult.hasErrors) throw new Error(fetchResult.errors[0].message);
+            const latest = fetchResult.records[0];
+            const fieldsToSave: Record<string, any> = {
+                CD_dateactive: { value: newDateActive },
+                CD_modifieddate: { value: Date.now() },
+            };
+            if (!isDueToday) {
+                fieldsToSave.CD_date = { value: newDate };
+                fieldsToSave.CD_hideuntildate = { value: 0 };
+            }
+            const result = await privateDB.saveRecords([{
+                recordName: latest.recordName,
+                recordChangeTag: latest.recordChangeTag,
+                fields: fieldsToSave,
+            }], { zoneID });
+            if (result.hasErrors) throw new Error(result.errors[0].message);
+            const saved = result.records[0];
+            const final: TaskRecord = { ...optimistic, recordChangeTag: saved.recordChangeTag };
+            setTasks(prev => prev.map(t => t.recordName === final.recordName ? final : t));
+            upsertTaskInCache(final);
+        } catch (err) {
+            console.error('Failed to toggle today:', err);
+            setTasks(prev => prev.map(t => t.recordName === task.recordName ? task : t));
+            upsertTaskInCache(task);
+        }
+    };
+
     const renderTaskList = (tasksToRender: TaskRecord[]) => {
         // Filter passed tasks based on search and tags
         const filteredTasks = tasksToRender.filter(task => {
@@ -3312,6 +3410,7 @@ function ProjectsList() {
                         onEditClick={handleTaskEditClick}
                         onMoveToTop={handleMoveToTop}
                         onMoveToBottom={handleMoveToBottom}
+                        onToggleToday={handleToggleToday}
                         onNoteChange={handleTaskNoteChange}
                         onTagsAdd={handleTagsAdd}
                         isCompleting={completingTaskIds.has(task.recordName)}
@@ -3541,6 +3640,8 @@ function ProjectsList() {
                 onMoveDueToTop={handleMoveDueToTop}
                 onInfoClick={setSelectedProjectDetails}
                 lastReviewDate={lastReviewDate}
+                onShowSettings={() => setShowSettings(true)}
+                todayEventCount={todayEvents.length}
             />
             {/* Main Content: Tasks */}
             <div className="flex-1 flex flex-col overflow-hidden bg-white">
@@ -3557,7 +3658,8 @@ function ProjectsList() {
                                                     : viewMode === 'due' ? 'Due and Overdue'
                                                         : viewMode === 'all_tasks' ? 'All tasks'
                                                             : viewMode === 'review' ? 'Review tasks'
-                                                                : 'Completed Tasks'
+                                                                : viewMode === 'today' ? 'Today'
+                                                                    : 'Completed Tasks'
                             }
                         </h1>
                         {(viewMode === 'project' && selectedProject || viewMode === 'inbox' || viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due' || viewMode === 'waiting' || viewMode === 'deferred' || viewMode === 'all_tasks') && (
@@ -3725,6 +3827,52 @@ function ProjectsList() {
                                 Finish review
                             </button>
                         </div>
+                    ) : viewMode === 'today' ? (
+                        <div className="max-w-lg mx-auto pt-4">
+                            <p className="text-sm text-gray-400 mb-5">
+                                {new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}
+                            </p>
+                            {!googleToken ? (
+                                <div className="text-center py-16 bg-gray-50 rounded-2xl border border-dashed border-gray-200">
+                                    <Sun className="w-12 h-12 text-yellow-200 mx-auto mb-4" />
+                                    <p className="text-gray-500 mb-3">Connect Google Calendar to see today's events.</p>
+                                    <button
+                                        onClick={() => setShowSettings(true)}
+                                        className="text-sm text-blue-600 hover:underline"
+                                    >
+                                        Open Settings
+                                    </button>
+                                </div>
+                            ) : loadingTodayEvents ? (
+                                <div className="flex justify-center py-16">
+                                    <Loader2 className="w-8 h-8 animate-spin text-gray-300" />
+                                </div>
+                            ) : todayEvents.length === 0 ? (
+                                <div className="text-center py-16 bg-gray-50 rounded-2xl border border-dashed border-gray-200">
+                                    <Sun className="w-12 h-12 text-yellow-200 mx-auto mb-4" />
+                                    <p className="text-gray-500">No events today.</p>
+                                </div>
+                            ) : (
+                                <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden shadow-sm divide-y divide-gray-50">
+                                    {todayEvents.map(event => (
+                                        <div key={`${event.calendarId}-${event.id}`} className="flex items-start gap-3 px-5 py-3.5">
+                                            <div
+                                                className="w-2.5 h-2.5 rounded-full flex-shrink-0 mt-1.5"
+                                                style={{ backgroundColor: event.calendarColor }}
+                                            />
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-sm font-medium text-gray-900 truncate">
+                                                    {event.summary || '(No title)'}
+                                                </p>
+                                                <p className="text-xs text-gray-400 mt-0.5">
+                                                    {formatEventTime(event)}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
                     ) : loadingTasks ? (
                         <div className="flex justify-center p-10">
                             <Loader2 className="w-8 h-8 animate-spin text-gray-300" />
@@ -3852,6 +4000,16 @@ function ProjectsList() {
                     )}
                 </div>
             </div>
+
+            {showSettings && (
+                <SettingsModal
+                    onClose={() => setShowSettings(false)}
+                    googleToken={googleToken}
+                    onGoogleToken={handleGoogleToken}
+                    selectedCalendars={selectedCalendars}
+                    onSaveCalendars={handleSaveCalendars}
+                />
+            )}
 
             {/* Keyboard Shortcuts Modal */}
             {

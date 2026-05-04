@@ -15,7 +15,8 @@ import {
     ArrowUpToLine,
     ArrowDownToLine,
     AlignLeft,
-    FolderOpen
+    FolderOpen,
+    Minus,
 } from 'lucide-react';
 import React from 'react';
 
@@ -45,6 +46,7 @@ type TaskItemProps = {
     onEditClick: (task: TaskRecord) => void;
     onMoveToTop?: (task: TaskRecord) => void;
     onMoveToBottom?: (task: TaskRecord) => void;
+    onToggleToday?: (task: TaskRecord) => void;
     onNoteChange?: (task: TaskRecord, newNote: string) => void;
     onTagsAdd?: (task: TaskRecord, tagIds: string[]) => void;
     isCompleting?: boolean;
@@ -74,6 +76,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     onEditClick,
     onMoveToTop,
     onMoveToBottom,
+    onToggleToday,
     onNoteChange,
     onTagsAdd,
     isCompleting
@@ -435,6 +438,38 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                                             <ArrowDownToLine className="w-4 h-4" />
                                         </button>
                                     )}
+
+                                    {onToggleToday && (() => {
+                                        const endOfToday = new Date(); endOfToday.setHours(23, 59, 59, 999);
+                                        const isDueToday = task.fields.CD_dateactive?.value === 1
+                                            && task.fields.CD_date?.value != null
+                                            && task.fields.CD_date.value <= endOfToday.getTime();
+                                        return isDueToday ? (
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); onToggleToday(task); }}
+                                                className="flex items-center gap-1 px-2 py-1 text-gray-500 bg-gray-100 hover:bg-gray-200 rounded-lg ml-0.5 cursor-pointer text-xs font-medium"
+                                                title="Clear due date"
+                                            >
+                                                <span className="relative inline-flex items-center justify-center w-4 h-4">
+                                                    <Calendar className="w-4 h-4" />
+                                                    <Minus className="w-2.5 h-2.5 absolute" />
+                                                </span>
+                                                Clear date
+                                            </button>
+                                        ) : (
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); onToggleToday(task); }}
+                                                className="flex items-center gap-1 px-2 py-1 text-yellow-700 bg-yellow-50 hover:bg-yellow-100 rounded-lg ml-0.5 cursor-pointer text-xs font-medium"
+                                                title="Set due today"
+                                            >
+                                                <span className="relative inline-flex items-center justify-center w-4 h-4">
+                                                    <Calendar className="w-4 h-4" />
+                                                    <span className="absolute text-[8px] font-bold leading-none mt-0.5">1</span>
+                                                </span>
+                                                Today
+                                            </button>
+                                        );
+                                    })()}
 
                                     <button
                                         onClick={(e) => { e.stopPropagation(); setIsNoteExpanded(!isNoteExpanded); }}
