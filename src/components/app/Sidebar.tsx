@@ -209,37 +209,42 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 <button
                                     onClick={handleClearSearch}
                                     className="p-1.5 text-gray-400 hover:text-red-500 rounded-full transition-colors"
-                                    title="Clear Filter"
+                                    data-tooltip="Clear Filter"
+                                    data-tooltip-pos="bottom"
                                 >
                                     <XCircle className="w-5 h-5" />
                                 </button>
                             )}
                             <button
                                 onClick={onMoveDueToTop}
-                                className="p-1.5 text-gray-400 hover:bg-gray-100 hover:text-blue-600 rounded-full transition-colors"
-                                title="Move Due to Top"
+                                className="p-1.5 text-gray-400 hover:bg-gray-100 hover:text-blue-600 rounded-full transition-colors cursor-pointer"
+                                data-tooltip="Move Due to Top"
+                                data-tooltip-pos="bottom"
                             >
                                 <ArrowUpDown className="w-5 h-5" />
                             </button>
                             <button
                                 onClick={onRefresh}
                                 disabled={isRefreshing}
-                                className={`p-1.5 rounded-full transition-colors ${isRefreshing ? 'text-blue-500' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'}`}
-                                title="Refresh"
+                                className={`p-1.5 rounded-full transition-colors cursor-pointer ${isRefreshing ? 'text-blue-500' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'}`}
+                                data-tooltip="Refresh"
+                                data-tooltip-pos="bottom"
                             >
                                 <RotateCcw className={`w-5 h-5 ${isRefreshing ? 'animate-spin' : ''}`} />
                             </button>
                             <button
                                 onClick={() => setIsSearchOpen(true)}
-                                className={`p-1.5 rounded-full transition-colors ${searchQuery ? 'text-indigo-600 bg-indigo-50' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'}`}
-                                title="Search (F)"
+                                className={`p-1.5 rounded-full transition-colors cursor-pointer ${searchQuery ? 'text-indigo-600 bg-indigo-50' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'}`}
+                                data-tooltip="Search (F)"
+                                data-tooltip-pos="bottom"
                             >
                                 <Search className="w-5 h-5" />
                             </button>
                             <button
                                 onClick={onShowSettings}
-                                className="p-1.5 rounded-full transition-colors text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-                                title="Settings"
+                                className="p-1.5 rounded-full transition-colors cursor-pointer text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                                data-tooltip="Settings"
+                                data-tooltip-pos="bottom"
                             >
                                 <Settings className="w-5 h-5" />
                             </button>
@@ -543,7 +548,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         <button
                             onClick={onCreateProject}
                             className="ml-auto p-1 rounded-full text-gray-400 hover:bg-blue-50 hover:text-blue-600 transition-colors"
-                            title="New Project (P)"
+                            data-tooltip="New Project (P)"
                         >
                             <Plus className="w-5 h-5" />
                         </button>

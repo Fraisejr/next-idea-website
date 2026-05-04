@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
+import { useSession } from 'next-auth/react';
 import { CloudKitProvider, useCloudKit } from '@/components/CloudKitProvider';
 import Navbar from '@/components/Navbar';
 import Footer from '@/components/Footer';
@@ -92,7 +93,8 @@ function ProjectsList() {
 
     // Google Calendar State
     const [showSettings, setShowSettings] = useState(false);
-    const [googleToken, setGoogleToken] = useState<string | null>(null);
+    const { data: session } = useSession();
+    const googleToken = session?.accessToken ?? null;
     const [selectedCalendars, setSelectedCalendars] = useState<SelectedCalendar[]>(() => {
         if (typeof window === 'undefined') return [];
         try { return JSON.parse(localStorage.getItem('google-calendars') || '[]'); } catch { return []; }
@@ -1429,13 +1431,6 @@ function ProjectsList() {
     };
 
     // ========== GOOGLE CALENDAR ==========
-    const handleGoogleToken = (token: string | null) => {
-        setGoogleToken(token);
-        if (!token) {
-            setTodayEvents([]);
-        }
-    };
-
     const handleSaveCalendars = (calendars: SelectedCalendar[]) => {
         setSelectedCalendars(calendars);
         localStorage.setItem('google-calendars', JSON.stringify(calendars));
@@ -1456,8 +1451,8 @@ function ProjectsList() {
                 });
                 setTodayEvents(all);
             })
-            .catch(err => {
-                if (err.message === '401') setGoogleToken(null);
+            .catch(() => {
+                setTodayEvents([]);
             })
             .finally(() => setLoadingTodayEvents(false));
     }, [googleToken, selectedCalendars]);
@@ -3678,8 +3673,9 @@ function ProjectsList() {
                         {(viewMode === 'project' && selectedProject || viewMode === 'inbox' || viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due' || viewMode === 'waiting' || viewMode === 'deferred' || viewMode === 'all_tasks') && (
                             <button
                                 onClick={handleCreateTaskAtTop}
-                                className="p-1 rounded-full text-gray-400 hover:bg-blue-50 hover:text-blue-600 transition-colors"
-                                title="New Task (Cmd+N)"
+                                className="p-1 rounded-full text-gray-400 hover:bg-blue-50 hover:text-blue-600 transition-colors cursor-pointer"
+                                data-tooltip="New Task (N)"
+                                data-tooltip-pos="bottom"
                             >
                                 <Plus className="w-6 h-6" />
                             </button>
@@ -3740,10 +3736,10 @@ function ProjectsList() {
                                 >
                                     <button
                                         onClick={toggleInclude}
-                                        className={`px-2 py-1 transition-colors hover:bg-blue-100 ${
+                                        className={`px-2 py-1 transition-colors hover:bg-blue-100 cursor-pointer ${
                                             isIncluded ? 'bg-blue-100 text-blue-700' : 'text-gray-400 hover:text-blue-600'
                                         }`}
-                                        title="Include tag"
+                                        data-tooltip="Include tag"
                                     >
                                         +
                                     </button>
@@ -3756,10 +3752,10 @@ function ProjectsList() {
 
                                     <button
                                         onClick={toggleExclude}
-                                        className={`px-2.5 py-1 transition-colors hover:bg-red-100 ${
+                                        className={`px-2.5 py-1 transition-colors hover:bg-red-100 cursor-pointer ${
                                             isExcluded ? 'bg-red-100 text-red-700' : 'text-gray-400 hover:text-red-600'
                                         }`}
-                                        title="Exclude tag"
+                                        data-tooltip="Exclude tag"
                                     >
                                         −
                                     </button>
@@ -3980,8 +3976,6 @@ function ProjectsList() {
             {showSettings && (
                 <SettingsModal
                     onClose={() => setShowSettings(false)}
-                    googleToken={googleToken}
-                    onGoogleToken={handleGoogleToken}
                     selectedCalendars={selectedCalendars}
                     onSaveCalendars={handleSaveCalendars}
                 />
@@ -4309,7 +4303,7 @@ function ProjectsList() {
                                                     target="_blank"
                                                     rel="noopener noreferrer"
                                                     className="p-2 bg-purple-50 text-purple-600 rounded-lg hover:bg-purple-100 transition-colors flex items-center justify-center"
-                                                    title="Open Link"
+                                                    data-tooltip="Open Link"
                                                 >
                                                     <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                                         <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
@@ -4347,7 +4341,7 @@ function ProjectsList() {
                             <div className="px-6 py-4 border-t border-gray-100">
                                 <button
                                     onClick={handleDeleteTask}
-                                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 rounded-lg text-sm font-medium transition-colors"
+                                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 rounded-lg text-sm font-medium transition-colors cursor-pointer"
                                 >
                                     <Trash2 className="w-4 h-4" />
                                     Delete Task
@@ -4355,11 +4349,6 @@ function ProjectsList() {
                             </div>
 
 
-                            {/* Footer info */}
-                            <div className="p-4 bg-gray-50 text-xs text-gray-400 border-t border-gray-100 flex justify-between">
-                                <span>Change Tag: {selectedTaskDetails.recordChangeTag.slice(0, 8)}...</span>
-                                <span>{selectedTaskDetails.fields.CD_modifieddate?.value ? new Date(selectedTaskDetails.fields.CD_modifieddate.value).toLocaleTimeString() : 'No date'}</span>
-                            </div>
                         </div>
                     </div>
                 )
@@ -4406,7 +4395,7 @@ function ProjectsList() {
                                             <button
                                                 key={c}
                                                 onClick={() => handleUpdateProjectDetail('CD_color', c)}
-                                                className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-transform ${selectedProjectDetails.fields.CD_color?.value === c ? 'border-gray-900 scale-110' : 'border-transparent hover:scale-105'}`}
+                                                className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-transform cursor-pointer ${selectedProjectDetails.fields.CD_color?.value === c ? 'border-gray-900 scale-110' : 'border-transparent hover:scale-105'}`}
                                                 style={{ backgroundColor: c }}
                                             />
                                         ))}
@@ -4427,7 +4416,7 @@ function ProjectsList() {
                                                 <button
                                                     key={iconName}
                                                     onClick={() => handleUpdateProjectDetail('CD_icon', iconName)}
-                                                    className={`p-2 rounded-lg flex items-center justify-center transition-colors ${isSelected ? 'bg-blue-100 text-blue-600' : 'bg-gray-50 text-gray-400 hover:bg-gray-100'}`}
+                                                    className={`p-2 rounded-lg flex items-center justify-center transition-colors cursor-pointer ${isSelected ? 'bg-blue-100 text-blue-600' : 'bg-gray-50 text-gray-400 hover:bg-gray-100'}`}
                                                     title={iconName}
                                                 >
                                                     <SFSymbolMapper symbol={iconName} size={20} />
@@ -4451,14 +4440,14 @@ function ProjectsList() {
                                                 <p className="text-xs text-gray-400 text-center">No open tasks — you can finalise this project.</p>
                                                 <button
                                                     onClick={handleCompleteProject}
-                                                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-green-50 text-green-700 hover:bg-green-100 border border-green-200 rounded-lg text-sm font-medium transition-colors"
+                                                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-green-50 text-green-700 hover:bg-green-100 border border-green-200 rounded-lg text-sm font-medium transition-colors cursor-pointer"
                                                 >
                                                     <Check className="w-4 h-4" />
                                                     Mark Project as Complete
                                                 </button>
                                                 <button
                                                     onClick={handleDeleteProject}
-                                                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 rounded-lg text-sm font-medium transition-colors"
+                                                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 rounded-lg text-sm font-medium transition-colors cursor-pointer"
                                                 >
                                                     <Trash2 className="w-4 h-4" />
                                                     Delete Project

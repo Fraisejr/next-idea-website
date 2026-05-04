@@ -414,7 +414,8 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                                     <button
                                         onClick={(e) => { e.stopPropagation(); onInsertTask(task); }}
                                         className="p-1.5 text-green-600 bg-green-50 hover:bg-green-100 rounded-lg cursor-pointer"
-                                        title="Insert Task Below"
+                                        data-tooltip="Insert below (N)"
+                                        data-tooltip-pos="bottom"
                                     >
                                         <Plus className="w-4 h-4" />
                                     </button>
@@ -423,7 +424,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                                         <button
                                             onClick={(e) => { e.stopPropagation(); onMoveToTop(task); }}
                                             className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg ml-0.5 cursor-pointer"
-                                            title="Move to Top"
+                                            data-tooltip="Move to Top"
                                         >
                                             <ArrowUpToLine className="w-4 h-4" />
                                         </button>
@@ -433,7 +434,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                                         <button
                                             onClick={(e) => { e.stopPropagation(); onMoveToBottom(task); }}
                                             className="p-1.5 text-orange-600 bg-orange-50 hover:bg-orange-100 rounded-lg ml-0.5 cursor-pointer"
-                                            title="Move to Bottom"
+                                            data-tooltip="Move to Bottom"
                                         >
                                             <ArrowDownToLine className="w-4 h-4" />
                                         </button>
@@ -448,7 +449,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                                             <button
                                                 onClick={(e) => { e.stopPropagation(); onToggleToday(task); }}
                                                 className="flex items-center gap-1 px-2 py-1 text-gray-500 bg-gray-100 hover:bg-gray-200 rounded-lg ml-0.5 cursor-pointer text-xs font-medium"
-                                                title="Clear due date"
+                                                data-tooltip="Clear due date"
                                             >
                                                 <span className="relative inline-flex items-center justify-center w-4 h-4">
                                                     <Calendar className="w-4 h-4" />
@@ -460,7 +461,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                                             <button
                                                 onClick={(e) => { e.stopPropagation(); onToggleToday(task); }}
                                                 className="flex items-center gap-1 px-2 py-1 text-yellow-700 bg-yellow-50 hover:bg-yellow-100 rounded-lg ml-0.5 cursor-pointer text-xs font-medium"
-                                                title="Set due today"
+                                                data-tooltip="Set due today"
                                             >
                                                 <span className="relative inline-flex items-center justify-center w-4 h-4">
                                                     <Calendar className="w-4 h-4" />
@@ -482,7 +483,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                                     <button
                                         onClick={(e) => { e.stopPropagation(); onTaskClick(task); }}
                                         className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg ml-0.5 cursor-pointer"
-                                        title="Task Details"
+                                        data-tooltip="Task Details"
                                     >
                                         <Info className="w-4 h-4" />
                                     </button>
@@ -494,7 +495,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                                             rel="noopener noreferrer"
                                             onClick={(e) => e.stopPropagation()}
                                             className="p-1.5 text-purple-600 bg-purple-50 hover:bg-purple-100 rounded-lg ml-0.5 cursor-pointer flex items-center justify-center"
-                                            title="Open Link"
+                                            data-tooltip="Open Link"
                                         >
                                             <ExternalLink className="w-4 h-4" />
                                         </a>
@@ -543,7 +544,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                             <div className="w-full mt-2" onClick={(e) => e.stopPropagation()}>
                                 <button
                                     onClick={(e) => { e.stopPropagation(); setIsNoteExpanded(!isNoteExpanded); }}
-                                    className="flex items-center gap-1.5 text-[11px] font-medium text-gray-400 hover:text-gray-600 transition-colors"
+                                    className="flex items-center gap-1.5 text-[11px] font-medium text-gray-400 hover:text-gray-600 transition-colors cursor-pointer"
                                 >
                                     <AlignLeft className="w-3.5 h-3.5" />
                                     <span>{isNoteExpanded ? 'Hide Note' : 'Show Note'}</span>
