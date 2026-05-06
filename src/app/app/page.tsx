@@ -250,12 +250,12 @@ function ProjectsList() {
         const endOfToday = new Date();
         endOfToday.setHours(23, 59, 59, 999);
         return Object.values(allTasksCache).filter(task =>
-            task.fields.CD_completed?.value !== 1 &&
+            (task.fields.CD_completed?.value !== 1 || completingTaskIds.has(task.recordName)) &&
             task.fields.CD_dateactive?.value === 1 &&
             task.fields.CD_date?.value != null &&
             task.fields.CD_date.value <= endOfToday.getTime()
         );
-    }, [allTasksCache]);
+    }, [allTasksCache, completingTaskIds]);
 
     // Search Logic
     const { projectsWithMatches, listsWithMatches, matchingTaskIds } = useMemo(() => {
