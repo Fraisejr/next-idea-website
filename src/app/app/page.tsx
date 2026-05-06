@@ -102,6 +102,14 @@ function ProjectsList() {
     const [todayEvents, setTodayEvents] = useState<GoogleEvent[]>([]);
     const [loadingTodayEvents, setLoadingTodayEvents] = useState(false);
 
+    // TodaySlot state — persists Today view order to CloudKit CD_TodaySlot records
+    const [todaySlotRecords, setTodaySlotRecords] = useState<any[]>([]);
+    const todaySlotRecordsRef = useRef<any[]>([]);
+    const [todayCloudOrder, setTodayCloudOrder] = useState<string[]>([]);
+    const todaySlotByItemIdRef = useRef<Map<string, any>>(new Map());
+    const taskCdIdMapRef = useRef<Map<string, string>>(new Map());
+    const allTasksCacheRef = useRef<Record<string, TaskRecord>>({});
+
     // Details Panel State
     const [selectedTaskDetails, setSelectedTaskDetails] = useState<TaskRecord | null>(null);
     const [selectedProjectDetails, setSelectedProjectDetails] = useState<ProjectRecord | null>(null);
@@ -418,7 +426,25 @@ function ProjectsList() {
                 }
             };
 
-            await Promise.all([fetchProjAndTags(), fetchTasks(), fetchRelations()]);
+            const fetchTodaySlots = async () => {
+                try {
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    const query = {
+                        recordType: 'CD_TodaySlot',
+                        filterBy: [
+                            { fieldName: 'CD_date', comparator: 'GREATER_THAN_OR_EQUALS', fieldValue: { value: today.getTime() - 86400000 } },
+                            { fieldName: 'CD_date', comparator: 'LESS_THAN', fieldValue: { value: today.getTime() + 2 * 86400000 } },
+                        ],
+                        sortBy: [{ fieldName: 'CD_order', ascending: true }],
+                        resultsLimit: 500,
+                    };
+                    const result = await privateDB.performQuery(query, options);
+                    if (!result.hasErrors) { todaySlotRecordsRef.current = result.records; setTodaySlotRecords(result.records); }
+                } catch { /* ignore */ }
+            };
+
+            await Promise.all([fetchProjAndTags(), fetchTasks(), fetchRelations(), fetchTodaySlots()]);
         } catch (error) {
             console.error('[Manual Refresh] ❌ Error:', error);
         } finally {
@@ -680,7 +706,7 @@ function ProjectsList() {
 
 
                 // Find Single Actions project for Next Actions view or Someday view
-                const singleActionsProject = (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due' || viewMode === 'waiting' || viewMode === 'deferred')
+                const singleActionsProject = (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due' || viewMode === 'waiting' || viewMode === 'deferred' || viewMode === 'today')
                     ? projects.find(p => p.fields.CD_singleactions?.value === 1)
                     : null;
 
@@ -726,17 +752,21 @@ function ProjectsList() {
 
 
                 // Replace temp task with real one
-                setTasks(prev => prev.map(t =>
-                    t.recordName === 'new-task' ? {
-                        ...savedRecord,
-                        fields: {
-                            ...savedRecord.fields,
-                            ...((viewMode === 'due' && !savedRecord.fields.CD_date) ? { CD_date: { value: Date.now() }, CD_dateactive: { value: 1 } } : {}),
-                            ...((viewMode === 'waiting' && !savedRecord.fields.CD_waitingfor) ? { CD_waitingfor: { value: 1 }, CD_someday: { value: 0 } } : {}),
-                            ...((viewMode === 'deferred' && !savedRecord.fields.CD_date) ? { CD_date: { value: new Date(new Date().setHours(24, 0, 0, 0)).getTime() }, CD_dateactive: { value: 1 }, CD_hideuntildate: { value: 1 }, CD_someday: { value: 0 } } : {})
-                        }
-                    } : t
-                ));
+                if (viewMode === 'today') {
+                    removeTaskFromCache('new-task');
+                } else {
+                    setTasks(prev => prev.map(t =>
+                        t.recordName === 'new-task' ? {
+                            ...savedRecord,
+                            fields: {
+                                ...savedRecord.fields,
+                                ...((viewMode === 'due' && !savedRecord.fields.CD_date) ? { CD_date: { value: Date.now() }, CD_dateactive: { value: 1 } } : {}),
+                                ...((viewMode === 'waiting' && !savedRecord.fields.CD_waitingfor) ? { CD_waitingfor: { value: 1 }, CD_someday: { value: 0 } } : {}),
+                                ...((viewMode === 'deferred' && !savedRecord.fields.CD_date) ? { CD_date: { value: new Date(new Date().setHours(24, 0, 0, 0)).getTime() }, CD_dateactive: { value: 1 }, CD_hideuntildate: { value: 1 }, CD_someday: { value: 0 } } : {})
+                            }
+                        } : t
+                    ));
+                }
 
                 // Add to cache to prevent flickering and enable instant view switching
                 upsertTaskInCache(savedRecord);
@@ -857,10 +887,9 @@ function ProjectsList() {
     };
 
     const handleCreateTask = () => {
-        if ((!selectedProject && viewMode !== 'inbox' && viewMode !== 'next_actions' && viewMode !== 'someday' && viewMode !== 'due' && viewMode !== 'waiting' && viewMode !== 'deferred' && viewMode !== 'all_tasks') || editingTaskId) return; // Don't start if already editing
+        if ((!selectedProject && viewMode !== 'inbox' && viewMode !== 'next_actions' && viewMode !== 'someday' && viewMode !== 'due' && viewMode !== 'waiting' && viewMode !== 'deferred' && viewMode !== 'all_tasks' && viewMode !== 'today') || editingTaskId) return;
 
-        // Find Single Actions project for Next Actions view or Someday view
-        const singleActionsProject = (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due' || viewMode === 'waiting' || viewMode === 'deferred')
+        const singleActionsProject = (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due' || viewMode === 'waiting' || viewMode === 'deferred' || viewMode === 'today')
             ? projects.find(p => p.fields.CD_singleactions?.value === 1)
             : null;
 
@@ -871,13 +900,12 @@ function ProjectsList() {
             fields: {
                 CD_name: { value: '' },
                 CD_id: { value: 'new-task' },
-                // all_tasks / Inbox: omit project. Next Actions/Someday: use Single Actions project. Project mode: use selectedProject.
                 ...(viewMode === 'inbox' || viewMode === 'all_tasks' ? {}
-                    : (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due' || viewMode === 'waiting' || viewMode === 'deferred')
+                    : (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due' || viewMode === 'waiting' || viewMode === 'deferred' || viewMode === 'today')
                         ? (singleActionsProject?.recordName ? { CD_project: { value: singleActionsProject.recordName } } : {})
                         : (selectedProject?.recordName ? { CD_project: { value: selectedProject.recordName } } : {})),
                 ...(viewMode === 'someday' ? { CD_someday: { value: 1 } } : {}),
-                ...(viewMode === 'due' ? { CD_date: { value: Date.now() }, CD_dateactive: { value: 1 } } : {}),
+                ...((viewMode === 'due' || viewMode === 'today') ? { CD_date: { value: Date.now() }, CD_dateactive: { value: 1 } } : {}),
                 ...(viewMode === 'waiting' ? { CD_waitingfor: { value: 1 }, CD_someday: { value: 0 } } : {}),
                 ...(viewMode === 'deferred' ? { CD_date: { value: new Date(new Date().setHours(24, 0, 0, 0)).getTime() }, CD_dateactive: { value: 1 }, CD_hideuntildate: { value: 1 }, CD_someday: { value: 0 } } : {}),
                 CD_completed: { value: 0 },
@@ -885,13 +913,17 @@ function ProjectsList() {
             }
         };
 
-        setTasks(prev => [...prev, newTask]);
+        if (viewMode === 'today') {
+            upsertTaskInCache(newTask);
+        } else {
+            setTasks(prev => [...prev, newTask]);
+        }
         setEditingTaskId('new-task');
         setEditTaskName('');
     };
 
     const handleInsertTask = async (afterTask: TaskRecord) => {
-        if ((!selectedProject && viewMode !== 'inbox' && viewMode !== 'next_actions' && viewMode !== 'someday' && viewMode !== 'due' && viewMode !== 'waiting' && viewMode !== 'deferred' && viewMode !== 'all_tasks') || editingTaskId || !container) return;
+        if ((!selectedProject && viewMode !== 'inbox' && viewMode !== 'next_actions' && viewMode !== 'someday' && viewMode !== 'due' && viewMode !== 'waiting' && viewMode !== 'deferred' && viewMode !== 'all_tasks' && viewMode !== 'today') || editingTaskId || !container) return;
 
         // Find index of afterTask
         const index = tasks.findIndex(t => t.recordName === afterTask.recordName);
@@ -928,7 +960,7 @@ function ProjectsList() {
         });
 
         // Find Single Actions project for Next Actions view or Someday view
-        const singleActionsProject = (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due' || viewMode === 'waiting' || viewMode === 'deferred')
+        const singleActionsProject = (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due' || viewMode === 'waiting' || viewMode === 'deferred' || viewMode === 'today')
             ? projects.find(p => p.fields.CD_singleactions?.value === 1)
             : null;
 
@@ -940,15 +972,14 @@ function ProjectsList() {
             fields: {
                 CD_name: { value: '' },
                 CD_id: { value: crypto.randomUUID() }, // Client-side UUID for new task
-                // Inbox / all_tasks: omit project. Next Actions/Someday: use Single Actions project. Project mode: use selectedProject.
                 ...(viewMode === 'inbox' || viewMode === 'all_tasks' ? {}
-                    : (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due' || viewMode === 'waiting' || viewMode === 'deferred')
+                    : (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due' || viewMode === 'waiting' || viewMode === 'deferred' || viewMode === 'today')
                         ? (singleActionsProject?.recordName ? { CD_project: { value: singleActionsProject.recordName } } : {})
                         : (selectedProject?.recordName ? { CD_project: { value: selectedProject.recordName } } : {})),
 
                 // View specific defaults
                 ...(viewMode === 'someday' ? { CD_someday: { value: 1 } } : {}),
-                ...(viewMode === 'due' ? { CD_date: { value: Date.now() }, CD_dateactive: { value: 1 } } : {}),
+                ...((viewMode === 'due' || viewMode === 'today') ? { CD_date: { value: Date.now() }, CD_dateactive: { value: 1 } } : {}),
                 ...(viewMode === 'waiting' ? { CD_waitingfor: { value: 1 }, CD_someday: { value: 0 } } : {}),
                 ...(viewMode === 'deferred' ? { CD_date: { value: new Date(new Date().setHours(24, 0, 0, 0)).getTime() }, CD_dateactive: { value: 1 }, CD_hideuntildate: { value: 1 }, CD_someday: { value: 0 } } : {}),
 
@@ -978,13 +1009,13 @@ function ProjectsList() {
             }
         };
 
-        // Insert new task into the local array at the correct position
-        updatedTasks.splice(index + 1, 0, newTask);
-
-        // Sort the updatedTasks array to ensure correct display order
-        updatedTasks.sort((a, b) => (a.fields.CD_order?.value ?? 0) - (b.fields.CD_order?.value ?? 0));
-
-        setTasks(updatedTasks);
+        if (viewMode === 'today') {
+            upsertTaskInCache(newTask);
+        } else {
+            updatedTasks.splice(index + 1, 0, newTask);
+            updatedTasks.sort((a, b) => (a.fields.CD_order?.value ?? 0) - (b.fields.CD_order?.value ?? 0));
+            setTasks(updatedTasks);
+        }
         setEditingTaskId('new-task');
         setEditTaskName('');
 
@@ -1047,9 +1078,9 @@ function ProjectsList() {
 
     // Create task at top
     const handleCreateTaskAtTop = () => {
-        if ((!selectedProject && viewMode !== 'inbox' && viewMode !== 'next_actions' && viewMode !== 'someday' && viewMode !== 'due' && viewMode !== 'waiting' && viewMode !== 'deferred' && viewMode !== 'all_tasks') || editingTaskId) return;
+        if ((!selectedProject && viewMode !== 'inbox' && viewMode !== 'next_actions' && viewMode !== 'someday' && viewMode !== 'due' && viewMode !== 'waiting' && viewMode !== 'deferred' && viewMode !== 'all_tasks' && viewMode !== 'today') || editingTaskId) return;
 
-        const singleActionsProject = (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due' || viewMode === 'waiting' || viewMode === 'deferred')
+        const singleActionsProject = (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due' || viewMode === 'waiting' || viewMode === 'deferred' || viewMode === 'today')
             ? projects.find(p => p.fields.CD_singleactions?.value === 1)
             : null;
 
@@ -1061,11 +1092,11 @@ function ProjectsList() {
                 CD_name: { value: '' },
                 CD_id: { value: 'new-task' },
                 ...(viewMode === 'inbox' || viewMode === 'all_tasks' ? {}
-                    : (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due' || viewMode === 'waiting' || viewMode === 'deferred')
+                    : (viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due' || viewMode === 'waiting' || viewMode === 'deferred' || viewMode === 'today')
                         ? (singleActionsProject?.recordName ? { CD_project: { value: singleActionsProject.recordName } } : {})
                         : (selectedProject?.recordName ? { CD_project: { value: selectedProject.recordName } } : {})),
                 ...(viewMode === 'someday' ? { CD_someday: { value: 1 } } : {}),
-                ...(viewMode === 'due' ? { CD_date: { value: Date.now() }, CD_dateactive: { value: 1 } } : {}),
+                ...((viewMode === 'due' || viewMode === 'today') ? { CD_date: { value: Date.now() }, CD_dateactive: { value: 1 } } : {}),
                 ...(viewMode === 'waiting' ? { CD_waitingfor: { value: 1 }, CD_someday: { value: 0 } } : {}),
                 ...(viewMode === 'deferred' ? { CD_date: { value: new Date(new Date().setHours(24, 0, 0, 0)).getTime() }, CD_dateactive: { value: 1 }, CD_hideuntildate: { value: 1 }, CD_someday: { value: 0 } } : {}),
                 CD_completed: { value: 0 },
@@ -1073,7 +1104,11 @@ function ProjectsList() {
             }
         };
 
-        setTasks(prev => [...prev, newTask].sort((a, b) => (a.fields.CD_order?.value ?? 0) - (b.fields.CD_order?.value ?? 0)));
+        if (viewMode === 'today') {
+            upsertTaskInCache(newTask);
+        } else {
+            setTasks(prev => [...prev, newTask].sort((a, b) => (a.fields.CD_order?.value ?? 0) - (b.fields.CD_order?.value ?? 0)));
+        }
         setEditingTaskId('new-task');
         setEditTaskName('');
     };
@@ -1130,10 +1165,68 @@ function ProjectsList() {
         setEditTaskName(task.fields.CD_name?.value || '');
     };
 
+    // Save Today view order to CloudKit CD_TodaySlot records.
+    // Mirrors iOS saveSlots: delete all existing today's slots, then recreate from scratch.
+    // This prevents accumulation of duplicate records when called multiple times.
+    const saveTodayOrder = useCallback(async (orderedItemIds: string[]) => {
+        setTodayCloudOrder(orderedItemIds);
+        if (!container) return;
+        const privateDB = container.privateCloudDatabase;
+        const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const todayMs = today.getTime();
+
+        // Delete ALL fetched TodaySlot records — this cleans up any accumulated duplicates
+        // regardless of what date they were created with (mirrors iOS saveSlots delete-then-recreate)
+        const toDelete = todaySlotRecordsRef.current.map(r => ({ recordName: r.recordName }));
+        if (toDelete.length > 0) {
+            try { await privateDB.deleteRecords(toDelete, { zoneID }); } catch { /* ignore */ }
+        }
+
+        // Create fresh records for every item in the new order
+        if (orderedItemIds.length === 0) return;
+        const toSave = orderedItemIds.map((itemId, index) => {
+            const task = allTasksCacheRef.current[itemId];
+            return {
+                recordName: crypto.randomUUID(),
+                recordType: 'CD_TodaySlot',
+                fields: {
+                    CD_entityName: { value: 'TodaySlot' },
+                    CD_id: { value: crypto.randomUUID() },
+                    CD_date: { value: todayMs },
+                    CD_order: { value: (index + 1) * 1.0 },
+                    ...(task
+                        ? { CD_taskId: { value: task.fields.CD_id.value }, CD_type: { value: 'task' } }
+                        : { CD_eventId: { value: `google-${itemId}` }, CD_type: { value: 'event' } }),
+                },
+            };
+        });
+
+        try {
+            const result = await privateDB.saveRecords(toSave, { zoneID });
+            if (!result.hasErrors) {
+                // All previously fetched records were deleted; local state is now just the newly saved ones
+                const next = [...result.records];
+                todaySlotRecordsRef.current = next;
+                setTodaySlotRecords(next);
+                // Update slot lookup ref
+                const newSlotByItemId = new Map<string, any>();
+                orderedItemIds.forEach((itemId, i) => newSlotByItemId.set(itemId, result.records[i]));
+                todaySlotByItemIdRef.current = newSlotByItemId;
+            } else {
+                console.error('[TodaySlots] Save errors:', result.errors);
+            }
+        } catch (e) { console.error('[TodaySlots] Save threw:', e); }
+    }, [container]);
+
     const handleTaskCancel = () => {
-        // If cancelling a new task, remove it from the list
         if (editingTaskId === 'new-task') {
-            setTasks(prev => prev.filter(t => t.recordName !== 'new-task'));
+            if (viewMode === 'today') {
+                removeTaskFromCache('new-task');
+            } else {
+                setTasks(prev => prev.filter(t => t.recordName !== 'new-task'));
+            }
         }
         setEditingTaskId(null);
         setEditTaskName('');
@@ -1217,6 +1310,93 @@ function ProjectsList() {
             fetchProjects();
         }
     }, [isAuthenticated, container]); // Run once on auth
+
+    // Load CD_TodaySlot records from CloudKit on authentication
+    useEffect(() => {
+        if (!container || !isAuthenticated) return;
+        const load = async () => {
+            const privateDB = container.privateCloudDatabase;
+            const options = { zoneID: { zoneName: 'com.apple.coredata.cloudkit.zone' } };
+            try {
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                const query = {
+                    recordType: 'CD_TodaySlot',
+                    filterBy: [
+                        { fieldName: 'CD_date', comparator: 'GREATER_THAN_OR_EQUALS', fieldValue: { value: today.getTime() - 86400000 } },
+                        { fieldName: 'CD_date', comparator: 'LESS_THAN', fieldValue: { value: today.getTime() + 2 * 86400000 } },
+                    ],
+                    sortBy: [{ fieldName: 'CD_order', ascending: true }],
+                    resultsLimit: 500,
+                };
+                const result = await privateDB.performQuery(query, options);
+                if (!result.hasErrors) {
+                    console.log('[TodaySlots] Fetched', result.records.length, 'records from CloudKit');
+                    if (result.records[0]) console.log('[TodaySlots] Sample:', JSON.stringify({ date: result.records[0].fields?.CD_date, type: result.records[0].fields?.CD_type, taskid: result.records[0].fields?.CD_taskId, order: result.records[0].fields?.CD_order }));
+                    todaySlotRecordsRef.current = result.records;
+                    setTodaySlotRecords(result.records);
+                } else {
+                    console.warn('[TodaySlots] Fetch errors:', result.errors);
+                }
+            } catch (e) { console.warn('[TodaySlots] Fetch threw:', e); }
+        };
+        load();
+    }, [container, isAuthenticated]);
+
+    // Keep task CD_id → recordName map in sync with task cache (ref only, doesn't affect order)
+    useEffect(() => {
+        allTasksCacheRef.current = allTasksCache;
+        const cdIdMap = new Map<string, string>();
+        Object.values(allTasksCache).forEach(task => {
+            const cdId = task.fields.CD_id?.value;
+            if (cdId) cdIdMap.set(cdId, task.recordName);
+        });
+        taskCdIdMapRef.current = cdIdMap;
+    }, [allTasksCache]);
+
+    // Rebuild Today order only when slot records change (not on every task cache update)
+    useEffect(() => {
+        if (todaySlotRecords.length === 0) return;
+
+        const cdIdMap = taskCdIdMapRef.current;
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        // Only load today's slots — ±4h buffer for UTC/local midnight differences
+        const windowStart = today.getTime() - 4 * 3600000;
+        const windowEnd   = today.getTime() + 86400000 + 4 * 3600000;
+
+        const todaySorted = [...todaySlotRecords]
+            .filter(slot => {
+                const d = slot.fields?.CD_date?.value;
+                return d != null && d >= windowStart && d < windowEnd;
+            })
+            .sort((a, b) => (a.fields?.CD_order?.value ?? 0) - (b.fields?.CD_order?.value ?? 0));
+
+        const slotByItemId = new Map<string, any>();
+        const seen = new Set<string>();
+        const orderedIds: string[] = [];
+        todaySorted.forEach(slot => {
+            const type = (slot.fields?.CD_type?.value ?? '').toLowerCase();
+            const taskCdId = slot.fields?.CD_taskId?.value;
+            const rawEventId: string | undefined = slot.fields?.CD_eventId?.value;
+            let itemId: string | null = null;
+            if (type === 'task' && taskCdId) {
+                itemId = cdIdMap.get(taskCdId) ?? null;
+            } else if (type === 'event' && rawEventId) {
+                // iOS stores Google Calendar event IDs as "google-{id}" — strip prefix
+                if (rawEventId.startsWith('google-')) itemId = rawEventId.slice(7);
+                // Ignore exchange events (web app only shows Google Calendar)
+            }
+            if (itemId && !seen.has(itemId)) {
+                seen.add(itemId);
+                orderedIds.push(itemId);
+                slotByItemId.set(itemId, slot);
+            }
+        });
+
+        todaySlotByItemIdRef.current = slotByItemId;
+        setTodayCloudOrder(orderedIds);
+    }, [todaySlotRecords]);
 
     // Debounced Note Save
     useEffect(() => {
@@ -3670,7 +3850,7 @@ function ProjectsList() {
                                                                     : 'Completed Tasks'
                             }
                         </h1>
-                        {(viewMode === 'project' && selectedProject || viewMode === 'inbox' || viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due' || viewMode === 'waiting' || viewMode === 'deferred' || viewMode === 'all_tasks') && (
+                        {(viewMode === 'project' && selectedProject || viewMode === 'inbox' || viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'due' || viewMode === 'waiting' || viewMode === 'deferred' || viewMode === 'all_tasks' || viewMode === 'today') && (
                             <button
                                 onClick={handleCreateTaskAtTop}
                                 className="p-1 rounded-full text-gray-400 hover:bg-blue-50 hover:text-blue-600 transition-colors cursor-pointer"
@@ -3843,6 +4023,8 @@ function ProjectsList() {
                             loadingEvents={loadingTodayEvents}
                             googleToken={googleToken}
                             onShowSettings={() => setShowSettings(true)}
+                            order={todayCloudOrder}
+                            onOrderChange={saveTodayOrder}
                             renderTask={(task) => (
                                 <TaskItem
                                     key={task.recordName}

@@ -788,27 +788,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     )}
                 </div>
 
-                {/* Sidebar Footer: Global Views */}
-                <div className="p-2 border-t border-gray-100 bg-white">
-                    <div
-                        onClick={() => {
-                            setViewMode('history');
-                            setSelectedProject(null);
-                        }}
-                        className={`group flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${viewMode === 'history'
-                            ? 'bg-blue-50 text-blue-700'
-                            : 'hover:bg-gray-100 text-gray-700'
-                            }`}
-                    >
-                        <Clock className="w-5 h-5 text-gray-400 group-hover:text-blue-600" />
-                        <span className="font-medium flex-1">Completed Tasks</span>
-                        {counts?.history ? (
-                            <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full text-xs font-medium group-hover:bg-blue-100 group-hover:text-blue-600">
-                                {counts.history}
-                            </span>
-                        ) : null}
-                    </div>
-                </div>
 
                 {/* Keyboard Shortcuts Button */}
                 <div className="p-4 border-t border-gray-100">

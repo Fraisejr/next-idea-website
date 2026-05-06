@@ -9,23 +9,6 @@ type EventItem = { type: 'event'; id: string; event: GoogleEvent };
 type TaskItem  = { type: 'task';  id: string; task: TaskRecord };
 type TodayItem = EventItem | TaskItem;
 
-function correctEventOrder(items: TodayItem[]): TodayItem[] {
-    const positions: number[] = [];
-    const sorted: EventItem[] = [];
-    items.forEach((item, i) => {
-        if (item.type === 'event') { positions.push(i); sorted.push(item); }
-    });
-    sorted.sort((a, b) => {
-        const at = a.event.start.dateTime || a.event.start.date || '';
-        const bt = b.event.start.dateTime || b.event.start.date || '';
-        return at.localeCompare(bt);
-    });
-    const result = [...items];
-    positions.forEach((pos, i) => { result[pos] = sorted[i]; });
-    return result;
-}
-
-const STORAGE_KEY = 'today-order';
 
 type Props = {
     todayEvents: GoogleEvent[];
@@ -33,39 +16,64 @@ type Props = {
     loadingEvents: boolean;
     googleToken: string | null;
     onShowSettings: () => void;
+    order: string[];
+    onOrderChange: (ids: string[]) => void;
     renderTask: (task: TaskRecord) => React.ReactNode;
 };
 
-export function TodayView({ todayEvents, dueTodayTasks, loadingEvents, googleToken, onShowSettings, renderTask }: Props) {
-    const [order, setOrder] = useState<string[]>(() => {
-        if (typeof window === 'undefined') return [];
-        try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); } catch { return []; }
-    });
+export function TodayView({ todayEvents, dueTodayTasks, loadingEvents, googleToken, onShowSettings, order, onOrderChange, renderTask }: Props) {
     const [dragId, setDragId]         = useState<string | null>(null);
     const [dragOverId, setDragOverId] = useState<string | null>(null);
     const [dragOverPos, setDragOverPos] = useState<'top' | 'bottom'>('bottom');
 
     const orderedItems = useMemo((): TodayItem[] => {
-        const allItems = new Map<string, TodayItem>();
-        todayEvents.forEach(e => allItems.set(e.id, { type: 'event', id: e.id, event: e }));
-        dueTodayTasks.forEach(t => allItems.set(t.recordName, { type: 'task', id: t.recordName, task: t }));
+        const taskItems = new Map<string, TaskItem>();
+        dueTodayTasks.forEach(t => taskItems.set(t.recordName, { type: 'task' as const, id: t.recordName, task: t }));
+        const eventItems = new Map<string, EventItem>();
+        todayEvents.forEach(e => eventItems.set(e.id, { type: 'event' as const, id: e.id, event: e }));
 
-        const result: TodayItem[] = [];
+        // resolveSlots: follow saved order exactly (mirrors iOS resolveSlots)
         const seen = new Set<string>();
+        const result: TodayItem[] = [];
         for (const id of order) {
-            const item = allItems.get(id);
+            if (seen.has(id)) continue;
+            const item = taskItems.get(id) ?? eventItems.get(id);
             if (item) { result.push(item); seen.add(id); }
         }
-        for (const [id, item] of allItems) {
-            if (!seen.has(id)) result.push(item);
-        }
-        return correctEventOrder(result);
-    }, [todayEvents, dueTodayTasks, order]);
 
-    const saveOrder = (ids: string[]) => {
-        setOrder(ids);
-        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(ids)); } catch {}
-    };
+        // addNewItems — unseen events: insert at chronologically correct position (mirrors iOS)
+        const unseenEvents = [...todayEvents]
+            .filter(e => !seen.has(e.id))
+            .sort((a, b) => (a.start.dateTime || a.start.date || '').localeCompare(b.start.dateTime || b.start.date || ''));
+        for (const event of unseenEvents) {
+            const eTime = event.start.dateTime || event.start.date || '';
+            // Find last existing event whose start <= this event's start
+            let lastBeforeIdx = -1;
+            for (let i = result.length - 1; i >= 0; i--) {
+                const ri = result[i];
+                if (ri.type === 'event') {
+                    const t = ri.event.start.dateTime || ri.event.start.date || '';
+                    if (t <= eTime) { lastBeforeIdx = i; break; }
+                }
+            }
+            let insertIdx: number;
+            if (lastBeforeIdx !== -1) {
+                insertIdx = lastBeforeIdx + 1;
+            } else {
+                const firstEventIdx = result.findIndex(i => i.type === 'event');
+                insertIdx = firstEventIdx !== -1 ? firstEventIdx : result.length;
+            }
+            result.splice(insertIdx, 0, eventItems.get(event.id)!);
+            seen.add(event.id);
+        }
+
+        // addNewItems — unseen tasks: append at end (mirrors iOS)
+        for (const [id, task] of taskItems) {
+            if (!seen.has(id)) result.push(task);
+        }
+
+        return result;
+    }, [todayEvents, dueTodayTasks, order]);
 
     const handleDragOver = (e: React.DragEvent, targetId: string) => {
         e.preventDefault();
@@ -83,7 +91,21 @@ export function TodayView({ todayEvents, dueTodayTasks, loadingEvents, googleTok
         newIds.splice(fromIdx, 1);
         const toIdx = newIds.indexOf(targetId);
         newIds.splice(dragOverPos === 'top' ? toIdx : toIdx + 1, 0, dragId);
-        saveOrder(newIds);
+
+        // enforceEventOrder: re-sort events into chronological order within their positions (mirrors iOS)
+        const itemById = new Map(orderedItems.map(i => [i.id, i]));
+        const sortedEventIds = newIds
+            .filter(id => itemById.get(id)?.type === 'event')
+            .sort((a, b) => {
+                const ia = itemById.get(a); const ib = itemById.get(b);
+                const ea = ia?.type === 'event' ? ia.event : null;
+                const eb = ib?.type === 'event' ? ib.event : null;
+                return (ea?.start.dateTime || ea?.start.date || '').localeCompare(eb?.start.dateTime || eb?.start.date || '');
+            });
+        let ei = 0;
+        const enforced = newIds.map(id => itemById.get(id)?.type === 'event' ? sortedEventIds[ei++] : id);
+
+        onOrderChange(enforced);
         setDragId(null);
         setDragOverId(null);
     };
