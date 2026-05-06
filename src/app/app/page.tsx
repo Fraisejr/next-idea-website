@@ -754,6 +754,15 @@ function ProjectsList() {
                 // Replace temp task with real one
                 if (viewMode === 'today') {
                     removeTaskFromCache('new-task');
+                    const newOrder = todayCloudOrder.map(id => id === 'new-task' ? savedRecord.recordName : id);
+                    setTodayCloudOrder(newOrder);
+                    // Add to cache and ref immediately so saveTodayOrder can build the correct slot type
+                    upsertTaskInCache(savedRecord);
+                    allTasksCacheRef.current = { ...allTasksCacheRef.current, [savedRecord.recordName]: savedRecord };
+                    saveTodayOrder(newOrder);
+                    setEditingTaskId(null);
+                    setEditTaskName('');
+                    return;
                 } else {
                     setTasks(prev => prev.map(t =>
                         t.recordName === 'new-task' ? {
@@ -1011,6 +1020,14 @@ function ProjectsList() {
 
         if (viewMode === 'today') {
             upsertTaskInCache(newTask);
+            setTodayCloudOrder(prev => {
+                const filtered = prev.filter(id => id !== 'new-task');
+                const afterIdx = filtered.indexOf(afterTask.recordName);
+                const insertAt = afterIdx !== -1 ? afterIdx + 1 : filtered.length;
+                const next = [...filtered];
+                next.splice(insertAt, 0, 'new-task');
+                return next;
+            });
         } else {
             updatedTasks.splice(index + 1, 0, newTask);
             updatedTasks.sort((a, b) => (a.fields.CD_order?.value ?? 0) - (b.fields.CD_order?.value ?? 0));
@@ -1106,6 +1123,7 @@ function ProjectsList() {
 
         if (viewMode === 'today') {
             upsertTaskInCache(newTask);
+            setTodayCloudOrder(prev => ['new-task', ...prev.filter(id => id !== 'new-task')]);
         } else {
             setTasks(prev => [...prev, newTask].sort((a, b) => (a.fields.CD_order?.value ?? 0) - (b.fields.CD_order?.value ?? 0)));
         }
@@ -1166,8 +1184,8 @@ function ProjectsList() {
     };
 
     // Save Today view order to CloudKit CD_TodaySlot records.
-    // Mirrors iOS saveSlots: delete all existing today's slots, then recreate from scratch.
-    // This prevents accumulation of duplicate records when called multiple times.
+    // Fetches the latest slots from CloudKit before deleting, so any records created by iOS
+    // since our last fetch are also cleaned up (prevents stale-ref duplicate accumulation).
     const saveTodayOrder = useCallback(async (orderedItemIds: string[]) => {
         setTodayCloudOrder(orderedItemIds);
         if (!container) return;
@@ -1177,9 +1195,29 @@ function ProjectsList() {
         today.setHours(0, 0, 0, 0);
         const todayMs = today.getTime();
 
-        // Delete ALL fetched TodaySlot records — this cleans up any accumulated duplicates
-        // regardless of what date they were created with (mirrors iOS saveSlots delete-then-recreate)
-        const toDelete = todaySlotRecordsRef.current.map(r => ({ recordName: r.recordName }));
+        // Fetch all current TodaySlot records from CloudKit (avoids stale local ref)
+        let allCurrentSlots: any[] = [...todaySlotRecordsRef.current];
+        try {
+            const q = {
+                recordType: 'CD_TodaySlot',
+                filterBy: [
+                    { fieldName: 'CD_date', comparator: 'GREATER_THAN_OR_EQUALS', fieldValue: { value: todayMs - 86400000 } },
+                    { fieldName: 'CD_date', comparator: 'LESS_THAN', fieldValue: { value: todayMs + 2 * 86400000 } },
+                ],
+                sortBy: [{ fieldName: 'CD_order', ascending: true }],
+                resultsLimit: 500,
+            };
+            const fresh = await privateDB.performQuery(q, { zoneID });
+            if (!fresh.hasErrors) {
+                // Merge: include any local records not yet in CloudKit
+                const freshNames = new Set(fresh.records.map((r: any) => r.recordName));
+                const localOnly = todaySlotRecordsRef.current.filter((r: any) => !freshNames.has(r.recordName));
+                allCurrentSlots = [...fresh.records, ...localOnly];
+            }
+        } catch { /* fall back to local ref */ }
+
+        // Delete everything (mirrors iOS saveSlots)
+        const toDelete = allCurrentSlots.map((r: any) => ({ recordName: r.recordName }));
         if (toDelete.length > 0) {
             try { await privateDB.deleteRecords(toDelete, { zoneID }); } catch { /* ignore */ }
         }
@@ -1224,6 +1262,7 @@ function ProjectsList() {
         if (editingTaskId === 'new-task') {
             if (viewMode === 'today') {
                 removeTaskFromCache('new-task');
+                setTodayCloudOrder(prev => prev.filter(id => id !== 'new-task'));
             } else {
                 setTasks(prev => prev.filter(t => t.recordName !== 'new-task'));
             }
@@ -3062,10 +3101,14 @@ function ProjectsList() {
             tomorrowStart.setHours(0, 0, 0, 0);
             const nextDateIsFuture = nextTimestamp >= tomorrowStart.getTime();
             setTimeout(() => {
+                // Update cache with new date so Today/Due views reflect the change immediately
+                upsertTaskInCache({ ...task, fields: { ...task.fields, CD_date: { value: nextTimestamp }, CD_completed: { value: 0 } } });
+                // Remove from Today order — recurring task's next date is always ≥ tomorrow
+                if (viewMode === 'today') {
+                    setTodayCloudOrder(prev => prev.filter(id => id !== task.recordName));
+                }
                 setTasks(currentTasks => {
                     if (hideUntilDue && nextDateIsFuture) {
-                        // Remove from the visible list — cache already has the updated record,
-                        // so it will reappear correctly when the view is switched or the cache refreshes.
                         return currentTasks.filter(t => t.recordName !== task.recordName);
                     }
                     return currentTasks.map(t =>
@@ -3101,6 +3144,7 @@ function ProjectsList() {
                             ? { ...t, recordChangeTag: savedOriginal.recordChangeTag }
                             : t
                     ));
+                    upsertTaskInCache({ ...task, recordChangeTag: savedOriginal.recordChangeTag, fields: { ...task.fields, CD_date: { value: nextTimestamp }, CD_completed: { value: 0 } } });
                 }
 
             } catch (err) {
