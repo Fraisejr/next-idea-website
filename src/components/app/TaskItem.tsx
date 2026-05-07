@@ -389,7 +389,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                 ) : (
                     <div className="flex flex-col w-full relative cursor-pointer">
                         <div className="flex items-center w-full">
-                            <span className={`text-gray-900 ${task.fields.CD_completed?.value === 1 ? 'line-through text-gray-400' : ''}`}>
+                            <span className={`text-gray-900 transition-all duration-500 ${task.fields.CD_completed?.value === 1 || isCompleting ? 'line-through text-gray-400' : ''}`}>
                                 {task.fields.CD_name?.value}
                             </span>
                             {/* Meta Icons */}

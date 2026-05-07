@@ -20,6 +20,7 @@ export interface ProjectRecord {
         CD_focus?: { value: number }; // 0 for false, 1 for true
         CD_icon?: { value: string }; // SF Symbol name
         CD_color?: { value: string }; // Hex color or name
+        CD_note?: { value: string };
     };
 }
 

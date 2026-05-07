@@ -116,6 +116,8 @@ function ProjectsList() {
     const [projectDetailsSaveState, setProjectDetailsSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
     const [linkInput, setLinkInput] = useState('');
     const [noteInput, setNoteInput] = useState('');
+    const [projectNoteInput, setProjectNoteInput] = useState('');
+    const projectNoteDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [detailsSaveState, setDetailsSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
     const detailsSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const noteDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -351,7 +353,7 @@ function ProjectsList() {
                 const query = {
                     recordType: 'CD_Project',
                     filterBy: [{ fieldName: 'CD_name', comparator: 'NOT_EQUALS', fieldValue: { value: '' } }],
-                    desiredKeys: ['CD_name', 'CD_id', 'CD_order', 'CD_completed', 'CD_singleactions', 'CD_focus', 'CD_icon', 'CD_color'],
+                    desiredKeys: ['CD_name', 'CD_id', 'CD_order', 'CD_completed', 'CD_singleactions', 'CD_focus', 'CD_icon', 'CD_color', 'CD_note'],
                     resultsLimit: 100
                 };
                 const projResult = await privateDB.performQuery(query, options);
@@ -1299,7 +1301,7 @@ function ProjectsList() {
                 const query = {
                     recordType: 'CD_Project',
                     filterBy: [{ fieldName: 'CD_name', comparator: 'NOT_EQUALS', fieldValue: { value: '' } }],
-                    desiredKeys: ['CD_name', 'CD_id', 'CD_order', 'CD_completed', 'CD_singleactions', 'CD_focus', 'CD_icon', 'CD_color'],
+                    desiredKeys: ['CD_name', 'CD_id', 'CD_order', 'CD_completed', 'CD_singleactions', 'CD_focus', 'CD_icon', 'CD_color', 'CD_note'],
                     resultsLimit: 100
                 };
                 const options = { zoneID: { zoneName: 'com.apple.coredata.cloudkit.zone' } };
@@ -1455,6 +1457,37 @@ function ProjectsList() {
             noteDebounceTimerRef.current = null;
         };
     }, [noteInput, selectedTaskDetails]);
+
+    // Sync project note when selected project changes
+    useEffect(() => {
+        setProjectNoteInput(selectedProject?.fields.CD_note?.value || '');
+    }, [selectedProject?.recordName]);
+
+    // Debounced project note save
+    useEffect(() => {
+        if (!selectedProject || !container) return;
+        const currentNote = selectedProject.fields.CD_note?.value || '';
+        if (projectNoteInput === currentNote) return;
+
+        const id = setTimeout(async () => {
+            const privateDB = container.privateCloudDatabase;
+            const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
+            const updated = { ...selectedProject, fields: { ...selectedProject.fields, CD_note: { value: projectNoteInput } } } as ProjectRecord;
+            setSelectedProject(updated);
+            setProjects(prev => prev.map(p => p.recordName === selectedProject.recordName ? updated : p));
+            try {
+                const fetched = await privateDB.fetchRecords([selectedProject.recordName], { zoneID });
+                if (fetched.hasErrors) return;
+                const fresh = fetched.records[0];
+                const toSave = { ...fresh, fields: { ...fresh.fields, CD_note: { value: projectNoteInput } } };
+                await privateDB.saveRecords([toSave], { zoneID });
+            } catch { /* ignore */ }
+        }, 1500);
+
+        projectNoteDebounceRef.current = id;
+        return () => { clearTimeout(id); projectNoteDebounceRef.current = null; };
+    }, [projectNoteInput, selectedProject?.recordName]);
+
     const handleCloseProjectDetailsPanel = () => {
         setSelectedProjectDetails(null);
     };
@@ -4008,6 +4041,22 @@ function ProjectsList() {
                 )}
 
                 <div className="flex-1 overflow-y-auto p-6">
+                    {viewMode === 'project' && selectedProject && (
+                        <div className="mb-5">
+                            <textarea
+                                value={projectNoteInput}
+                                onChange={(e) => setProjectNoteInput(e.target.value)}
+                                placeholder="Project notes…"
+                                className="w-full px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all resize-none"
+                                rows={3}
+                                onInput={(e) => {
+                                    const el = e.currentTarget;
+                                    el.style.height = 'auto';
+                                    el.style.height = `${el.scrollHeight}px`;
+                                }}
+                            />
+                        </div>
+                    )}
                     {viewMode === 'review' ? (
                         <div className="max-w-lg mx-auto pt-4">
                             {lastReviewDate && (
