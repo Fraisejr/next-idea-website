@@ -1197,6 +1197,43 @@ function ProjectsList() {
         today.setHours(0, 0, 0, 0);
         const todayMs = today.getTime();
 
+        // OPTIMISTIC: redistribute CD_order values immediately — before any await — so React
+        // batches this with setTodayCloudOrder in a single render. Without this, the re-sort
+        // in orderedItems sees stale CD_order values and jumps tasks back to their old positions
+        // until the CloudKit save completes.
+        const newTaskSequence = orderedItemIds.filter(id => !!allTasksCacheRef.current[id]);
+        const taskCdOrderRecords: any[] = [];
+        if (newTaskSequence.length > 0) {
+            const sortedOrderValues = newTaskSequence
+                .map(id => allTasksCacheRef.current[id].fields.CD_order?.value ?? 0)
+                .sort((a, b) => a - b);
+
+            newTaskSequence.forEach((id, i) => {
+                const task = allTasksCacheRef.current[id];
+                const newOrderVal = sortedOrderValues[i];
+                if (task && task.fields.CD_order?.value !== newOrderVal) {
+                    taskCdOrderRecords.push({
+                        recordName: task.recordName,
+                        recordType: 'CD_Task',
+                        recordChangeTag: task.recordChangeTag,
+                        fields: { CD_order: { value: newOrderVal } },
+                    });
+                }
+            });
+
+            if (taskCdOrderRecords.length > 0) {
+                setAllTasksCache(prev => {
+                    const next = { ...prev };
+                    taskCdOrderRecords.forEach(r => {
+                        const t = next[r.recordName];
+                        if (t) next[r.recordName] = { ...t, fields: { ...t.fields, CD_order: r.fields.CD_order } };
+                    });
+                    return next;
+                });
+            }
+        }
+
+        // ASYNC: persist TodaySlots and task CD_order to CloudKit
         // Fetch all current TodaySlot records from CloudKit (avoids stale local ref)
         let allCurrentSlots: any[] = [...todaySlotRecordsRef.current];
         try {
@@ -1211,20 +1248,17 @@ function ProjectsList() {
             };
             const fresh = await privateDB.performQuery(q, { zoneID });
             if (!fresh.hasErrors) {
-                // Merge: include any local records not yet in CloudKit
                 const freshNames = new Set(fresh.records.map((r: any) => r.recordName));
                 const localOnly = todaySlotRecordsRef.current.filter((r: any) => !freshNames.has(r.recordName));
                 allCurrentSlots = [...fresh.records, ...localOnly];
             }
         } catch { /* fall back to local ref */ }
 
-        // Delete everything (mirrors iOS saveSlots)
         const toDelete = allCurrentSlots.map((r: any) => ({ recordName: r.recordName }));
         if (toDelete.length > 0) {
             try { await privateDB.deleteRecords(toDelete, { zoneID }); } catch { /* ignore */ }
         }
 
-        // Create fresh records for every item in the new order
         if (orderedItemIds.length === 0) return;
         const toSave = orderedItemIds.map((itemId, index) => {
             const task = allTasksCacheRef.current[itemId];
@@ -1246,11 +1280,9 @@ function ProjectsList() {
         try {
             const result = await privateDB.saveRecords(toSave, { zoneID });
             if (!result.hasErrors) {
-                // All previously fetched records were deleted; local state is now just the newly saved ones
                 const next = [...result.records];
                 todaySlotRecordsRef.current = next;
                 setTodaySlotRecords(next);
-                // Update slot lookup ref
                 const newSlotByItemId = new Map<string, any>();
                 orderedItemIds.forEach((itemId, i) => newSlotByItemId.set(itemId, result.records[i]));
                 todaySlotByItemIdRef.current = newSlotByItemId;
@@ -1258,6 +1290,13 @@ function ProjectsList() {
                 console.error('[TodaySlots] Save errors:', result.errors);
             }
         } catch (e) { console.error('[TodaySlots] Save threw:', e); }
+
+        // Persist redistributed task order in background
+        if (taskCdOrderRecords.length > 0) {
+            privateDB.saveRecords(taskCdOrderRecords, { zoneID }).catch((e: unknown) =>
+                console.warn('[TodaySlots] Task CD_order save failed:', e)
+            );
+        }
     }, [container]);
 
     const handleTaskCancel = () => {
@@ -3582,16 +3621,37 @@ function ProjectsList() {
         const newDateActive = isDueToday ? 0 : 1;
         const newDate = Date.now();
 
+        // When adding to Today, move task to the top of global order (minOrder - 1)
+        let toTopOrder: number | undefined;
+        if (!isDueToday) {
+            const allUncompleted = Object.values(allTasksCache).filter(t => t.fields.CD_completed?.value !== 1);
+            const minOrder = allUncompleted.length > 0
+                ? Math.min(...allUncompleted.map(t => t.fields.CD_order?.value ?? 0))
+                : 0;
+            toTopOrder = minOrder - 1;
+        }
+
         const optimistic: TaskRecord = {
             ...task,
             fields: {
                 ...task.fields,
                 CD_dateactive: { value: newDateActive },
-                ...(!isDueToday ? { CD_date: { value: newDate }, CD_hideuntildate: { value: 0 } } : {}),
+                ...(!isDueToday ? {
+                    CD_date: { value: newDate },
+                    CD_hideuntildate: { value: 0 },
+                    ...(toTopOrder !== undefined ? { CD_order: { value: toTopOrder } } : {}),
+                } : {}),
             }
         };
         setTasks(prev => prev.map(t => t.recordName === task.recordName ? optimistic : t));
         upsertTaskInCache(optimistic);
+
+        if (!isDueToday) {
+            // Place at the top of Today (orderedItems pins all-day events above tasks automatically)
+            allTasksCacheRef.current = { ...allTasksCacheRef.current, [task.recordName]: optimistic };
+            const newTodayOrder = [task.recordName, ...todayCloudOrder.filter(id => id !== task.recordName)];
+            saveTodayOrder(newTodayOrder);
+        }
 
         try {
             const privateDB = container.privateCloudDatabase;
@@ -3606,6 +3666,7 @@ function ProjectsList() {
             if (!isDueToday) {
                 fieldsToSave.CD_date = { value: newDate };
                 fieldsToSave.CD_hideuntildate = { value: 0 };
+                if (toTopOrder !== undefined) fieldsToSave.CD_order = { value: toTopOrder };
             }
             const result = await privateDB.saveRecords([{
                 recordName: latest.recordName,

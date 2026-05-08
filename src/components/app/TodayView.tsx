@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Sun, Loader2 } from 'lucide-react';
 import { GoogleEvent, formatEventTime } from '@/lib/google';
 import { TaskRecord } from '@/lib/cloudkit';
@@ -8,7 +8,6 @@ import { TaskRecord } from '@/lib/cloudkit';
 type EventItem = { type: 'event'; id: string; event: GoogleEvent };
 type TaskItem  = { type: 'task';  id: string; task: TaskRecord };
 type TodayItem = EventItem | TaskItem;
-
 
 type Props = {
     todayEvents: GoogleEvent[];
@@ -22,58 +21,99 @@ type Props = {
 };
 
 export function TodayView({ todayEvents, dueTodayTasks, loadingEvents, googleToken, onShowSettings, order, onOrderChange, renderTask }: Props) {
-    const [dragId, setDragId]         = useState<string | null>(null);
-    const [dragOverId, setDragOverId] = useState<string | null>(null);
+    const [dragId, setDragId]           = useState<string | null>(null);
+    const [dragOverId, setDragOverId]   = useState<string | null>(null);
     const [dragOverPos, setDragOverPos] = useState<'top' | 'bottom'>('bottom');
+    const [now, setNow]                 = useState(() => new Date());
+
+    // Tick every 60 s so past events are removed reactively
+    useEffect(() => {
+        const id = setInterval(() => setNow(new Date()), 60_000);
+        return () => clearInterval(id);
+    }, []);
+
+    // Past timed events are hidden; all-day events always stay visible
+    const visibleEvents = useMemo(() =>
+        todayEvents.filter(e => {
+            if (!e.start.dateTime) return true;          // all-day
+            if (!e.end?.dateTime)  return true;          // no end — keep
+            return new Date(e.end.dateTime) > now;
+        }),
+    [todayEvents, now]);
 
     const orderedItems = useMemo((): TodayItem[] => {
         const taskItems = new Map<string, TaskItem>();
         dueTodayTasks.forEach(t => taskItems.set(t.recordName, { type: 'task' as const, id: t.recordName, task: t }));
-        const eventItems = new Map<string, EventItem>();
-        todayEvents.forEach(e => eventItems.set(e.id, { type: 'event' as const, id: e.id, event: e }));
 
-        // resolveSlots: follow saved order exactly (mirrors iOS resolveSlots)
+        // Split visible events into all-day (pinned) and timed
+        const allDayItems: EventItem[] = [];
+        const timedEventItems = new Map<string, EventItem>();
+        visibleEvents.forEach(e => {
+            const item: EventItem = { type: 'event', id: e.id, event: e };
+            if (!e.start.dateTime) allDayItems.push(item);
+            else timedEventItems.set(e.id, item);
+        });
+
         const seen = new Set<string>();
         const result: TodayItem[] = [];
+
+        // 1. All-day events always first, sorted by date
+        allDayItems
+            .sort((a, b) => (a.event.start.date || '').localeCompare(b.event.start.date || ''))
+            .forEach(e => { result.push(e); seen.add(e.id); });
+
+        // 2. resolveSlots: follow persisted order for timed events + tasks
         for (const id of order) {
             if (seen.has(id)) continue;
-            const item = taskItems.get(id) ?? eventItems.get(id);
+            const item = taskItems.get(id) ?? timedEventItems.get(id);
             if (item) { result.push(item); seen.add(id); }
         }
 
-        // addNewItems — unseen events: insert at chronologically correct position (mirrors iOS)
-        const unseenEvents = [...todayEvents]
+        // 3. Re-sort tasks within their current slot positions by CD_order.
+        //    This keeps the event-vs-task interleaving from the slots but always
+        //    reflects the global task order (bidirectional sync with other views).
+        const taskPositions: number[] = [];
+        for (let i = 0; i < result.length; i++) {
+            if (result[i].type === 'task') taskPositions.push(i);
+        }
+        const sortedByGlobalOrder = taskPositions
+            .map(i => result[i] as TaskItem)
+            .sort((a, b) => (a.task.fields.CD_order?.value ?? 0) - (b.task.fields.CD_order?.value ?? 0));
+        taskPositions.forEach((pos, i) => { result[pos] = sortedByGlobalOrder[i]; });
+
+        // 4. addNewItems — unseen timed events: insert chronologically among timed events
+        const unseenTimed = [...timedEventItems.values()]
             .filter(e => !seen.has(e.id))
-            .sort((a, b) => (a.start.dateTime || a.start.date || '').localeCompare(b.start.dateTime || b.start.date || ''));
-        for (const event of unseenEvents) {
-            const eTime = event.start.dateTime || event.start.date || '';
-            // Find last existing event whose start <= this event's start
+            .sort((a, b) => (a.event.start.dateTime || '').localeCompare(b.event.start.dateTime || ''));
+        for (const evItem of unseenTimed) {
+            const eTime = evItem.event.start.dateTime || '';
             let lastBeforeIdx = -1;
             for (let i = result.length - 1; i >= 0; i--) {
                 const ri = result[i];
-                if (ri.type === 'event') {
-                    const t = ri.event.start.dateTime || ri.event.start.date || '';
-                    if (t <= eTime) { lastBeforeIdx = i; break; }
+                if (ri.type === 'event' && ri.event.start.dateTime) {
+                    if ((ri.event.start.dateTime || '') <= eTime) { lastBeforeIdx = i; break; }
                 }
             }
             let insertIdx: number;
             if (lastBeforeIdx !== -1) {
                 insertIdx = lastBeforeIdx + 1;
             } else {
-                const firstEventIdx = result.findIndex(i => i.type === 'event');
-                insertIdx = firstEventIdx !== -1 ? firstEventIdx : result.length;
+                // No earlier timed event found — place after all-day block
+                const firstTimed = result.findIndex(i => i.type === 'event' && i.event.start.dateTime);
+                insertIdx = firstTimed !== -1 ? firstTimed : result.length;
             }
-            result.splice(insertIdx, 0, eventItems.get(event.id)!);
-            seen.add(event.id);
+            result.splice(insertIdx, 0, evItem);
+            seen.add(evItem.id);
         }
 
-        // addNewItems — unseen tasks: append at end (mirrors iOS)
-        for (const [id, task] of taskItems) {
-            if (!seen.has(id)) result.push(task);
-        }
+        // 5. addNewItems — unseen tasks: append at end in CD_order
+        const unseenTasks = [...taskItems.values()]
+            .filter(t => !seen.has(t.id))
+            .sort((a, b) => (a.task.fields.CD_order?.value ?? 0) - (b.task.fields.CD_order?.value ?? 0));
+        unseenTasks.forEach(t => result.push(t));
 
         return result;
-    }, [todayEvents, dueTodayTasks, order]);
+    }, [visibleEvents, dueTodayTasks, order]);
 
     const handleDragOver = (e: React.DragEvent, targetId: string) => {
         e.preventDefault();
@@ -85,25 +125,42 @@ export function TodayView({ todayEvents, dueTodayTasks, loadingEvents, googleTok
     const handleDrop = (e: React.DragEvent, targetId: string) => {
         e.preventDefault();
         if (!dragId || dragId === targetId) { setDragId(null); setDragOverId(null); return; }
-        const ids = orderedItems.map(i => i.id);
-        const newIds = [...ids];
+
+        const itemById = new Map(orderedItems.map(i => [i.id, i]));
+        const isAllDay = (id: string) => {
+            const item = itemById.get(id);
+            return item?.type === 'event' && !item.event.start.dateTime;
+        };
+
+        // All-day events are pinned — never let them be dragged
+        if (isAllDay(dragId)) { setDragId(null); setDragOverId(null); return; }
+
+        const newIds = orderedItems.map(i => i.id);
         const fromIdx = newIds.indexOf(dragId);
         newIds.splice(fromIdx, 1);
         const toIdx = newIds.indexOf(targetId);
-        newIds.splice(dragOverPos === 'top' ? toIdx : toIdx + 1, 0, dragId);
+        let insertPos = dragOverPos === 'top' ? toIdx : toIdx + 1;
 
-        // enforceEventOrder: re-sort events into chronological order within their positions (mirrors iOS)
-        const itemById = new Map(orderedItems.map(i => [i.id, i]));
-        const sortedEventIds = newIds
-            .filter(id => itemById.get(id)?.type === 'event')
+        // Clamp: never insert above the all-day block
+        const firstNonAllDay = newIds.findIndex(id => !isAllDay(id));
+        if (firstNonAllDay !== -1) insertPos = Math.max(insertPos, firstNonAllDay);
+
+        newIds.splice(insertPos, 0, dragId);
+
+        // enforceEventOrder: re-sort timed events chronologically within their positions.
+        // All-day events stay in their fixed spots at the top.
+        const sortedTimedIds = newIds
+            .filter(id => { const item = itemById.get(id); return item?.type === 'event' && item.event.start.dateTime; })
             .sort((a, b) => {
-                const ia = itemById.get(a); const ib = itemById.get(b);
-                const ea = ia?.type === 'event' ? ia.event : null;
-                const eb = ib?.type === 'event' ? ib.event : null;
-                return (ea?.start.dateTime || ea?.start.date || '').localeCompare(eb?.start.dateTime || eb?.start.date || '');
+                const ea = itemById.get(a); const eb = itemById.get(b);
+                return ((ea?.type === 'event' ? ea.event.start.dateTime : '') || '')
+                    .localeCompare((eb?.type === 'event' ? eb.event.start.dateTime : '') || '');
             });
         let ei = 0;
-        const enforced = newIds.map(id => itemById.get(id)?.type === 'event' ? sortedEventIds[ei++] : id);
+        const enforced = newIds.map(id => {
+            const item = itemById.get(id);
+            return (item?.type === 'event' && item.event.start.dateTime) ? sortedTimedIds[ei++] : id;
+        });
 
         onOrderChange(enforced);
         setDragId(null);
@@ -138,12 +195,13 @@ export function TodayView({ todayEvents, dueTodayTasks, loadingEvents, googleTok
                 <>
                     <div className="space-y-2">
                         {orderedItems.map(item => {
-                            const isOver = dragOverId === item.id;
+                            const isOver     = dragOverId === item.id;
                             const isDragging = dragId === item.id;
+                            const isAllDay   = item.type === 'event' && !item.event.start.dateTime;
                             return (
                                 <div
                                     key={item.id}
-                                    draggable
+                                    draggable={!isAllDay}
                                     onDragStart={(e) => {
                                         if (item.type === 'event') e.dataTransfer.setData('today-event', item.id);
                                         setDragId(item.id);
@@ -156,7 +214,7 @@ export function TodayView({ todayEvents, dueTodayTasks, loadingEvents, googleTok
                                     onDrop={(e) => handleDrop(e, item.id)}
                                     className={`relative ${isDragging ? 'opacity-40' : ''}`}
                                 >
-                                    {isOver && dragOverPos === 'top' && (
+                                    {isOver && dragOverPos === 'top' && !isAllDay && (
                                         <div className="absolute -top-1 left-0 right-0 h-0.5 bg-blue-400 rounded-full z-10 pointer-events-none" />
                                     )}
                                     {isOver && dragOverPos === 'bottom' && (
@@ -164,7 +222,7 @@ export function TodayView({ todayEvents, dueTodayTasks, loadingEvents, googleTok
                                     )}
 
                                     {item.type === 'event' ? (
-                                        <div className="relative group p-3 bg-white border border-gray-100 rounded-xl hover:shadow-sm transition-all flex items-center gap-3 cursor-grab active:cursor-grabbing select-none">
+                                        <div className={`relative group p-3 bg-white border border-gray-100 rounded-xl hover:shadow-sm transition-all flex items-center gap-3 select-none ${isAllDay ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'}`}>
                                             <div
                                                 className="w-2.5 h-2.5 rounded-full flex-shrink-0"
                                                 style={{ backgroundColor: item.event.calendarColor }}
