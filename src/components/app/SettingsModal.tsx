@@ -131,6 +131,11 @@ export function SettingsModal({ onClose, selectedCalendars, onSaveCalendars }: P
                             </div>
                         )}
                     </div>
+
+                    <div className="pt-4 border-t border-gray-50 flex items-center gap-4 text-xs text-gray-400">
+                        <a href="/privacy" target="_blank" className="hover:text-blue-500 transition-colors">Privacy Policy</a>
+                        <a href="/terms" target="_blank" className="hover:text-blue-500 transition-colors">Terms of Service</a>
+                    </div>
                 </div>
 
                 {/* Footer */}

@@ -799,6 +799,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         <span>Keyboard Shortcuts</span>
                         <span className="ml-auto text-xs text-gray-400">?</span>
                     </button>
+
+                    <div className="mt-2 px-2 flex items-center gap-4 text-[10px] text-gray-400 font-medium uppercase tracking-widest">
+                        <a href="/privacy" target="_blank" className="hover:text-blue-600 transition-colors">Privacy</a>
+                        <a href="/terms" target="_blank" className="hover:text-blue-600 transition-colors">Terms</a>
+                        <a href="/support" target="_blank" className="hover:text-blue-600 transition-colors">Support</a>
+                    </div>
                 </div>
             </div>
         </div>

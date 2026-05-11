@@ -34,6 +34,14 @@ export default function SupportPage() {
               </div>
             </div>
           </div>
+
+          <div className="pt-8 flex flex-col items-center gap-4">
+            <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Legal Documents</h2>
+            <div className="flex gap-6">
+              <a href="/privacy" className="text-gray-600 hover:text-blue-600 font-medium transition-colors">Privacy Policy</a>
+              <a href="/terms" className="text-gray-600 hover:text-blue-600 font-medium transition-colors">Terms of Service</a>
+            </div>
+          </div>
         </div>
       </main>
 
