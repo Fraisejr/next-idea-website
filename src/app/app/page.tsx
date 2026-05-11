@@ -109,6 +109,7 @@ function ProjectsList() {
     const todaySlotByItemIdRef = useRef<Map<string, any>>(new Map());
     const taskCdIdMapRef = useRef<Map<string, string>>(new Map());
     const allTasksCacheRef = useRef<Record<string, TaskRecord>>({});
+    const isSavingTodayOrderRef = useRef(false);
 
     // Details Panel State
     const [selectedTaskDetails, setSelectedTaskDetails] = useState<TaskRecord | null>(null);
@@ -1189,8 +1190,11 @@ function ProjectsList() {
     // Fetches the latest slots from CloudKit before deleting, so any records created by iOS
     // since our last fetch are also cleaned up (prevents stale-ref duplicate accumulation).
     const saveTodayOrder = useCallback(async (orderedItemIds: string[]) => {
+        if (isSavingTodayOrderRef.current) return;
+        isSavingTodayOrderRef.current = true;
+        
         setTodayCloudOrder(orderedItemIds);
-        if (!container) return;
+        if (!container) { isSavingTodayOrderRef.current = false; return; }
         const privateDB = container.privateCloudDatabase;
         const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
         const today = new Date();
@@ -1254,42 +1258,110 @@ function ProjectsList() {
             }
         } catch { /* fall back to local ref */ }
 
-        const toDelete = allCurrentSlots.map((r: any) => ({ recordName: r.recordName }));
-        if (toDelete.length > 0) {
-            try { await privateDB.deleteRecords(toDelete, { zoneID }); } catch { /* ignore */ }
-        }
+        // Map existing slots by their itemId to reuse them (handles duplicates if present)
+        const cdIdMap = taskCdIdMapRef.current;
+        const existingSlotsByItemId = new Map<string, any[]>();
+        const slotsToDelete: any[] = [];
 
-        if (orderedItemIds.length === 0) return;
-        const toSave = orderedItemIds.map((itemId, index) => {
-            const task = allTasksCacheRef.current[itemId];
-            return {
-                recordName: crypto.randomUUID(),
-                recordType: 'CD_TodaySlot',
-                fields: {
-                    CD_entityName: { value: 'TodaySlot' },
-                    CD_id: { value: crypto.randomUUID() },
-                    CD_date: { value: todayMs },
-                    CD_order: { value: (index + 1) * 1.0 },
-                    ...(task
-                        ? { CD_taskId: { value: task.fields.CD_id.value }, CD_type: { value: 'task' } }
-                        : { CD_eventId: { value: `google-${itemId}` }, CD_type: { value: 'event' } }),
-                },
-            };
+        allCurrentSlots.forEach(slot => {
+            const type = (slot.fields?.CD_type?.value ?? '').toLowerCase();
+            const taskCdId = slot.fields?.CD_taskId?.value;
+            const rawEventId: string | undefined = slot.fields?.CD_eventId?.value;
+            let itemId: string | null = null;
+            
+            if (type === 'task' && taskCdId) {
+                itemId = cdIdMap.get(taskCdId) ?? null;
+            } else if (type === 'event' && rawEventId) {
+                itemId = rawEventId.startsWith('google-') ? rawEventId.slice(7) : rawEventId;
+            }
+
+            if (itemId) {
+                if (!existingSlotsByItemId.has(itemId)) {
+                    existingSlotsByItemId.set(itemId, []);
+                }
+                existingSlotsByItemId.get(itemId)!.push(slot);
+            } else {
+                // Orphaned slot or unrecognized type
+                slotsToDelete.push({ recordName: slot.recordName });
+            }
         });
 
-        try {
-            const result = await privateDB.saveRecords(toSave, { zoneID });
-            if (!result.hasErrors) {
-                const next = [...result.records];
-                todaySlotRecordsRef.current = next;
-                setTodaySlotRecords(next);
-                const newSlotByItemId = new Map<string, any>();
-                orderedItemIds.forEach((itemId, i) => newSlotByItemId.set(itemId, result.records[i]));
-                todaySlotByItemIdRef.current = newSlotByItemId;
+        const toSave: any[] = [];
+        
+        orderedItemIds.forEach((itemId, index) => {
+            const task = allTasksCacheRef.current[itemId];
+            const existingSlots = existingSlotsByItemId.get(itemId);
+            const existingSlot = existingSlots?.shift();
+            const newOrder = (index + 1) * 1.0;
+            const newDate = todayMs;
+            
+            if (existingSlot) {
+                // Only update if something changed
+                const currentOrder = existingSlot.fields?.CD_order?.value;
+                const currentDate = existingSlot.fields?.CD_date?.value;
+                
+                if (currentOrder !== newOrder || currentDate !== newDate) {
+                    toSave.push({
+                        recordName: existingSlot.recordName,
+                        recordType: 'CD_TodaySlot',
+                        recordChangeTag: existingSlot.recordChangeTag,
+                        fields: {
+                            ...existingSlot.fields,
+                            CD_order: { value: newOrder },
+                            CD_date: { value: newDate }
+                        }
+                    });
+                }
             } else {
-                console.error('[TodaySlots] Save errors:', result.errors);
+                // Create new slot
+                toSave.push({
+                    recordName: crypto.randomUUID(),
+                    recordType: 'CD_TodaySlot',
+                    fields: {
+                        CD_entityName: { value: 'TodaySlot' },
+                        CD_id: { value: crypto.randomUUID() },
+                        CD_date: { value: newDate },
+                        CD_order: { value: newOrder },
+                        ...(task
+                            ? { CD_taskId: { value: task.fields.CD_id.value }, CD_type: { value: 'task' } }
+                            : { CD_eventId: { value: `google-${itemId}` }, CD_type: { value: 'event' } }),
+                    },
+                });
             }
-        } catch (e) { console.error('[TodaySlots] Save threw:', e); }
+        });
+
+        // Any remaining items in existingSlotsByItemId were removed from Today, so delete them
+        existingSlotsByItemId.forEach(slots => {
+            slots.forEach(slot => {
+                slotsToDelete.push({ recordName: slot.recordName });
+            });
+        });
+
+        if (slotsToDelete.length > 0) {
+            try { await privateDB.deleteRecords(slotsToDelete, { zoneID }); } catch (e) { console.warn('[TodaySlots] Delete errors:', e); }
+        }
+
+        if (toSave.length > 0) {
+            try {
+                const result = await privateDB.saveRecords(toSave, { zoneID });
+                if (!result.hasErrors) {
+                    const savedMap = new Map(result.records.map((r: any) => [r.recordName, r]));
+                    const next = allCurrentSlots
+                        .filter(slot => !slotsToDelete.some(d => d.recordName === slot.recordName))
+                        .map(slot => savedMap.get(slot.recordName) || slot)
+                        .concat(result.records.filter((r: any) => !allCurrentSlots.some(s => s.recordName === r.recordName)));
+                        
+                    todaySlotRecordsRef.current = next;
+                    setTodaySlotRecords(next);
+                } else {
+                    console.error('[TodaySlots] Save errors:', result.errors);
+                }
+            } catch (e) { console.error('[TodaySlots] Save threw:', e); }
+        } else if (slotsToDelete.length > 0) {
+            const next = allCurrentSlots.filter(slot => !slotsToDelete.some(d => d.recordName === slot.recordName));
+            todaySlotRecordsRef.current = next;
+            setTodaySlotRecords(next);
+        }
 
         // Persist redistributed task order in background
         if (taskCdOrderRecords.length > 0) {
@@ -1297,6 +1369,7 @@ function ProjectsList() {
                 console.warn('[TodaySlots] Task CD_order save failed:', e)
             );
         }
+        isSavingTodayOrderRef.current = false;
     }, [container]);
 
     const handleTaskCancel = () => {
@@ -1452,8 +1525,6 @@ function ProjectsList() {
             })
             .sort((a, b) => (a.fields?.CD_order?.value ?? 0) - (b.fields?.CD_order?.value ?? 0));
 
-        const slotByItemId = new Map<string, any>();
-        const seen = new Set<string>();
         const orderedIds: string[] = [];
         todaySorted.forEach(slot => {
             const type = (slot.fields?.CD_type?.value ?? '').toLowerCase();
@@ -1467,14 +1538,11 @@ function ProjectsList() {
                 if (rawEventId.startsWith('google-')) itemId = rawEventId.slice(7);
                 // Ignore exchange events (web app only shows Google Calendar)
             }
-            if (itemId && !seen.has(itemId)) {
-                seen.add(itemId);
+            if (itemId) {
                 orderedIds.push(itemId);
-                slotByItemId.set(itemId, slot);
             }
         });
 
-        todaySlotByItemIdRef.current = slotByItemId;
         setTodayCloudOrder(orderedIds);
     }, [todaySlotRecords]);
 
@@ -1919,9 +1987,21 @@ function ProjectsList() {
                     resultsLimit: 100
                 };
 
-                const [taskResult, projectResult] = await Promise.all([
+                const today = new Date(); today.setHours(0, 0, 0, 0);
+                const slotQuery = {
+                    recordType: 'CD_TodaySlot',
+                    filterBy: [
+                        { fieldName: 'CD_date', comparator: 'GREATER_THAN_OR_EQUALS', fieldValue: { value: today.getTime() - 86400000 } },
+                        { fieldName: 'CD_date', comparator: 'LESS_THAN', fieldValue: { value: today.getTime() + 2 * 86400000 } },
+                    ],
+                    sortBy: [{ fieldName: 'CD_order', ascending: true }],
+                    resultsLimit: 500,
+                };
+
+                const [taskResult, projectResult, slotResult] = await Promise.all([
                     privateDB.performQuery(taskQuery, { zoneID: ZONE_ID }),
                     privateDB.performQuery(projectQuery, { zoneID: ZONE_ID }),
+                    privateDB.performQuery(slotQuery, { zoneID: ZONE_ID }),
                 ]);
 
                 // Advance timestamp after both queries complete
@@ -1983,6 +2063,17 @@ function ProjectsList() {
                             });
                             return next;
                         });
+                    }
+                }
+
+                // ── Process slot changes ──────────────────────────────────────
+                if (!slotResult.hasErrors) {
+                    const fetchedSlots = slotResult.records;
+                    if (fetchedSlots.length > 0) {
+                        // We replace the full Today window set — it's small enough.
+                        // This ensures web app sees iOS-created slots within ~15s.
+                        todaySlotRecordsRef.current = fetchedSlots;
+                        setTodaySlotRecords(fetchedSlots);
                     }
                 }
 

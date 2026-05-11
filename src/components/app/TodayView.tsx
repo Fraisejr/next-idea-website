@@ -64,9 +64,11 @@ export function TodayView({ todayEvents, dueTodayTasks, loadingEvents, googleTok
 
         // 2. resolveSlots: follow persisted order for timed events + tasks
         for (const id of order) {
-            if (seen.has(id)) continue;
             const item = taskItems.get(id) ?? timedEventItems.get(id);
-            if (item) { result.push(item); seen.add(id); }
+            if (item) {
+                result.push(item);
+                seen.add(id);
+            }
         }
 
         // 3. Re-sort tasks within their current slot positions by CD_order.
@@ -194,13 +196,13 @@ export function TodayView({ todayEvents, dueTodayTasks, loadingEvents, googleTok
             ) : (
                 <>
                     <div className="space-y-2">
-                        {orderedItems.map(item => {
+                        {orderedItems.map((item, index) => {
                             const isOver     = dragOverId === item.id;
                             const isDragging = dragId === item.id;
                             const isAllDay   = item.type === 'event' && !item.event.start.dateTime;
                             return (
                                 <div
-                                    key={item.id}
+                                    key={`${item.id}-${index}`}
                                     draggable={!isAllDay}
                                     onDragStart={(e) => {
                                         if (item.type === 'event') e.dataTransfer.setData('today-event', item.id);
