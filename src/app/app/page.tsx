@@ -3617,8 +3617,8 @@ function ProjectsList() {
             CD_modifieddate: { value: Date.now() }
         };
 
-        // If moving TO 'next' and it was in Inbox (no project), we might want to assign it to Single Actions
-        if (section === 'next' && !task.fields.CD_project?.value) {
+        // If moving from Inbox (no project), assign to Single Actions
+        if (!task.fields.CD_project?.value) {
             const singleActionsProject = projects.find(p => p.fields.CD_singleactions?.value === 1);
             if (singleActionsProject) {
                 updates.CD_project = { value: singleActionsProject.recordName };
