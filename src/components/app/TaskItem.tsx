@@ -17,6 +17,9 @@ import {
     AlignLeft,
     FolderOpen,
     Minus,
+    SquarePlay,
+    Users,
+    List,
 } from 'lucide-react';
 import React from 'react';
 
@@ -48,6 +51,7 @@ type TaskItemProps = {
     onMoveToBottom?: (task: TaskRecord) => void;
     onToggleToday?: (task: TaskRecord) => void;
     onNoteChange?: (task: TaskRecord, newNote: string) => void;
+    onMoveToSection?: (task: TaskRecord, section: 'next' | 'waiting' | 'someday') => void;
     onTagsAdd?: (task: TaskRecord, tagIds: string[]) => void;
     isCompleting?: boolean;
 };
@@ -78,6 +82,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     onMoveToBottom,
     onToggleToday,
     onNoteChange,
+    onMoveToSection,
     onTagsAdd,
     isCompleting
 }) => {
@@ -153,6 +158,13 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     const showActions = (viewMode === 'project' || viewMode === 'all_tasks' || viewMode === 'inbox' || viewMode === 'next_actions' || viewMode === 'someday' || viewMode === 'waiting' || viewMode === 'deferred' || viewMode === 'due' || viewMode === 'today');
 
     const hasNote = localNote.trim().length > 0;
+
+    const currentSection = React.useMemo(() => {
+        if (task.fields.CD_waitingfor?.value === 1) return 'waiting';
+        if (task.fields.CD_someday?.value === 1) return 'someday';
+        if (!task.fields.CD_project?.value) return 'inbox';
+        return 'next';
+    }, [task]);
 
     return (
         <div
@@ -438,6 +450,38 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                                         >
                                             <ArrowDownToLine className="w-4 h-4" />
                                         </button>
+                                    )}
+
+                                    {onMoveToSection && (
+                                        <div className="flex items-center gap-0.5 ml-0.5">
+                                            {currentSection !== 'next' && (
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); onMoveToSection(task, 'next'); }}
+                                                    className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg cursor-pointer"
+                                                    data-tooltip="Move to Next Actions"
+                                                >
+                                                    <SquarePlay className="w-4 h-4" />
+                                                </button>
+                                            )}
+                                            {currentSection !== 'waiting' && (
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); onMoveToSection(task, 'waiting'); }}
+                                                    className="p-1.5 text-orange-600 bg-orange-50 hover:bg-orange-100 rounded-lg cursor-pointer"
+                                                    data-tooltip="Move to Waiting For"
+                                                >
+                                                    <Users className="w-4 h-4" />
+                                                </button>
+                                            )}
+                                            {currentSection !== 'someday' && (
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); onMoveToSection(task, 'someday'); }}
+                                                    className="p-1.5 text-[#92400e] bg-[#fdf4eb] hover:bg-[#fae8d0] rounded-lg cursor-pointer"
+                                                    data-tooltip="Move to Someday / Maybe"
+                                                >
+                                                    <List className="w-4 h-4" />
+                                                </button>
+                                            )}
+                                        </div>
                                     )}
 
                                     {onToggleToday && (() => {

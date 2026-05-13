@@ -89,7 +89,6 @@ export function CloudKitProvider({ children }: { children: ReactNode }) {
                 }
             } catch (err: any) {
                 // AUTH_PERSIST_ERROR on hard refresh is expected — ignore it.
-                // The user can navigate away and back to /app/ to restore their session.
                 if (err?.ckErrorCode !== 'AUTH_PERSIST_ERROR' &&
                     !err?._reason?.includes('ckSession')) {
                     console.error('CloudKit initialization error:', err);

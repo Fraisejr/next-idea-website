@@ -3608,6 +3608,69 @@ function ProjectsList() {
         }
     };
 
+    const handleMoveToSection = async (task: TaskRecord, section: 'next' | 'waiting' | 'someday') => {
+        if (!container) return;
+
+        const updates: any = {
+            CD_waitingfor: { value: section === 'waiting' ? 1 : 0 },
+            CD_someday: { value: section === 'someday' ? 1 : 0 },
+            CD_modifieddate: { value: Date.now() }
+        };
+
+        // If moving TO 'next' and it was in Inbox (no project), we might want to assign it to Single Actions
+        if (section === 'next' && !task.fields.CD_project?.value) {
+            const singleActionsProject = projects.find(p => p.fields.CD_singleactions?.value === 1);
+            if (singleActionsProject) {
+                updates.CD_project = { value: singleActionsProject.recordName };
+            }
+        }
+
+        // Optimistic update
+        setTasks(prev => prev.map(t => {
+            if (t.recordName === task.recordName) {
+                return {
+                    ...t,
+                    fields: {
+                        ...t.fields,
+                        ...updates
+                    }
+                };
+            }
+            return t;
+        }));
+
+        // Update Cache
+        upsertTaskInCache({
+            ...task,
+            fields: {
+                ...task.fields,
+                ...updates
+            }
+        });
+
+        try {
+            const privateDB = container.privateCloudDatabase;
+            const zoneID = { zoneName: 'com.apple.coredata.cloudkit.zone' };
+
+            const fetchResult = await privateDB.fetchRecords([task.recordName], { zoneID });
+            if (fetchResult.hasErrors) throw new Error(fetchResult.errors[0].message);
+            const fullRecord = fetchResult.records[0];
+
+            Object.keys(updates).forEach(key => {
+                fullRecord.fields[key] = updates[key];
+            });
+
+            const saveResult = await privateDB.saveRecords([fullRecord], { zoneID });
+            if (saveResult.hasErrors) throw new Error(saveResult.errors[0].message);
+
+            const savedRecord = saveResult.records[0];
+            upsertTaskInCache(savedRecord);
+        } catch (err: any) {
+            console.error('Move to section error:', err);
+            handleManualRefresh();
+        }
+    };
+
     const handleMoveToTop = async (task: TaskRecord) => {
         if (!container) return;
         const privateDB = container.privateCloudDatabase;
@@ -3829,6 +3892,7 @@ function ProjectsList() {
                         onMoveToBottom={handleMoveToBottom}
                         onToggleToday={handleToggleToday}
                         onNoteChange={handleTaskNoteChange}
+                        onMoveToSection={handleMoveToSection}
                         onTagsAdd={handleTagsAdd}
                         isCompleting={completingTaskIds.has(task.recordName)}
                     />
@@ -4298,6 +4362,7 @@ function ProjectsList() {
                                     onMoveToBottom={handleMoveToBottom}
                                     onToggleToday={handleToggleToday}
                                     onNoteChange={handleTaskNoteChange}
+                                    onMoveToSection={handleMoveToSection}
                                     onTagsAdd={handleTagsAdd}
                                     isCompleting={completingTaskIds.has(task.recordName)}
                                 />
