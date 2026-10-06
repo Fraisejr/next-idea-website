@@ -1,0 +1,5 @@
+DirectoryIndex index.html
+ErrorDocument 404 /404.html
+RewriteEngine On
+RewriteCond %{HTTP_HOST} ^(www\.)?nextapps\.org$ [NC]
+RewriteRule ^ - [R=410,L]
