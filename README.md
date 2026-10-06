@@ -1,6 +1,6 @@
 # Inspiraeon SL website
 
-A static company website presenting Inspiraeon SL’s consulting services and iOS app development. There are no web app, authentication, CloudKit, or Google Calendar integrations.
+A static company website presenting Inspiraeon SL’s management consulting, business process automation with AI agents, iOS apps, and Microsoft Power Apps services. There are no web app, authentication, CloudKit, or Google Calendar integrations.
 
 ## Development
 
