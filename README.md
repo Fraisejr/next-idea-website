@@ -24,4 +24,4 @@ No email addresses, product listings, or App Store links are published. The comp
 
 Upload the contents of `out/` to the document root assigned to `inspiraeon.com`. The build uses directory-style URLs so `/privacy/` and `/terms/` work on Apache without application routing. Preserve a backup of existing files and server configuration before replacing them.
 
-The build includes `public/.htaccess`, which sets `index.html` as the directory index, uses the local `/404.html` error page, and returns HTTP 410 for the retired `nextapps.org` domain. Include hidden files when uploading. Keep the package outside the public document root after extraction.
+The build includes `public/.htaccess`, which sets `index.html` as the directory index, uses the local `/404.html` error page, and returns HTTP 410 for the retired `nextapps.org` domain. Include hidden files when uploading. Apache must be able to read `.htaccess`: use file permissions `644` and directory permissions `755`. Keep the package outside the public document root after extraction.
