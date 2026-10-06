@@ -1,26 +1,12 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
 import "./globals.css";
-import { Providers } from "@/components/Providers";
-
-const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
 export const metadata: Metadata = {
-  title: "Next Idea - Organize your life",
-  description: "Organize your life, clear your mind, and boost your productivity.",
+  title: { default: "Inspiraeon SL — Thoughtful apps for everyday life", template: "%s | Inspiraeon SL" },
+  description: "Inspiraeon SL creates native software for Apple platforms. Discover Next Idea and contact the company.",
+  openGraph: { title: "Inspiraeon SL", description: "Thoughtful apps for everyday life. The company behind Next Idea.", type: "website" },
 };
 
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
-  return (
-    <html lang="en" className="scroll-smooth" suppressHydrationWarning>
-      <head>
-        <script src="https://cdn.apple-cloudkit.com/ck/2/cloudkit.js" async></script>
-      </head>
-      <body className={`${inter.variable} antialiased`} suppressHydrationWarning><Providers>{children}</Providers></body>
-    </html>
-  );
+export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  return <html lang="en"><body>{children}</body></html>;
 }
