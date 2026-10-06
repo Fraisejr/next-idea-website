@@ -29,15 +29,12 @@ h2 { font-size: clamp(30px, 4vw, 42px); line-height: 1.15; font-weight: 500; let
 .about-section { display: grid; grid-template-columns: 1fr 1.5fr; gap: 50px; }
 .about-section p:not(.eyebrow), .contact-section p:not(.eyebrow) { font-size: 16px; line-height: 1.8; color: var(--muted); max-width: 520px; margin-bottom: 16px; }
 .section-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 20px; }
-.app-card { background: #eaf0e3; padding: 48px; display: grid; grid-template-columns: 150px 1fr; gap: 28px; border-radius: 12px; }
-.app-icon img { border-radius: 23px; box-shadow: 0 10px 25px #253b3512; }
-.app-description .eyebrow { margin-bottom: 16px; }
-.app-description h3 { font-size: 32px; letter-spacing: -1px; font-weight: 500; margin-bottom: 16px; }
-.app-description > p:not(.eyebrow) { font-size: 16px; line-height: 1.8; color: var(--muted); max-width: 490px; }
-.app-links { display: flex; flex-wrap: wrap; align-items: center; gap: 28px; margin-top: 28px; }
-.text-link { font-size: 14px; }
+.services-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.service-card { background: #eaf0e3; padding: 40px; border-radius: 12px; }
+.service-card .eyebrow { margin-bottom: 24px; }
+.service-card h3 { font-size: 30px; line-height: 1.2; letter-spacing: -1px; font-weight: 500; margin-bottom: 18px; }
+.service-card > p:not(.eyebrow) { font-size: 16px; line-height: 1.8; color: var(--muted); }
 .contact-section { display: grid; grid-template-columns: 1.5fr 1fr; gap: 60px; padding-bottom: 80px; }
-.contact-email { display: inline-block; font-size: clamp(18px, 2.5vw, 25px); letter-spacing: -.5px; border-bottom: 1px solid #95a48d; padding-bottom: 7px; margin-top: 10px; overflow-wrap: anywhere; }
 .company-details { align-self: center; border-left: 1px solid var(--line); padding-left: 32px; }
 .company-details div + div { margin-top: 25px; }
 .company-details dt { font-size: 11px; color: var(--muted); margin-bottom: 6px; }
@@ -62,11 +59,10 @@ h2 { font-size: clamp(30px, 4vw, 42px); line-height: 1.15; font-weight: 500; let
   .company-section { padding: 40px 0; }
   .about-section, .contact-section { grid-template-columns: 1fr; gap: 18px; }
   .section-heading { display: block; }
-  .app-card { grid-template-columns: 1fr; padding: 28px; }
-  .app-description h3 { font-size: 27px; }
+  .services-grid { grid-template-columns: 1fr; }
+  .service-card { padding: 28px; }
+  .service-card h3 { font-size: 27px; }
   .company-details { border-left: 0; border-top: 1px solid var(--line); padding: 24px 0 0; margin-top: 15px; }
   .footer-inner { flex-direction: column; }
 }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } a { transition: none; } }
-.guide-steps { list-style: decimal; padding-left: 24px; color: var(--muted); line-height: 1.8; }
-.guide-steps li { padding-left: 5px; margin-bottom: 10px; }

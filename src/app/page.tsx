@@ -1,4 +1,3 @@
-import Image from "next/image";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 
@@ -8,33 +7,41 @@ export default function Home() {
       <Navbar />
       <main id="main-content" className="company-main">
         <section className="company-hero" aria-labelledby="intro-title">
-          <p className="eyebrow">Inspiraeon SL · Independent software</p>
-          <h1 id="intro-title">A little more clarity.<br /><span>A lot more possibility.</span></h1>
-          <p className="intro">We create thoughtful apps that help you make space for your ideas and move forward with what matters.</p>
-          <a className="button" href="#apps">Explore our app <span aria-hidden="true">↗</span></a>
-          <div className="hero-note"><span className="status-dot" /> Built with care for Apple devices.</div>
+          <p className="eyebrow">Inspiraeon SL · Consulting &amp; software</p>
+          <h1 id="intro-title">Clear thinking.<br /><span>Thoughtful software.</span></h1>
+          <p className="intro">We offer consulting services and build iOS apps, bringing practical thinking and considered design to digital projects.</p>
+          <a className="button" href="#services">Explore our services <span aria-hidden="true">↓</span></a>
+          <div className="hero-note"><span className="status-dot" /> From an early idea to a useful product.</div>
         </section>
 
         <section id="about" className="company-section about-section" aria-labelledby="about-title">
           <p className="eyebrow">01 / The company</p>
           <div>
-            <h2 id="about-title">Thoughtful software.<br />Everyday purpose.</h2>
-            <p>Inspiraeon SL is the company behind Next Idea. Our focus is simple: creating useful, considered software for everyday life.</p>
-            <p>We build native apps for Apple platforms, with an emphasis on clear design and helping people organize their ideas, projects, and next steps.</p>
+            <h2 id="about-title">A clear perspective.<br />A practical approach.</h2>
+            <p>Inspiraeon SL provides consulting services and develops native applications for iOS.</p>
+            <p>We help turn ideas into clear plans and useful software, with a focus on simplicity, usability, and the needs of the people using it.</p>
           </div>
         </section>
 
-        <section id="apps" className="company-section" aria-labelledby="apps-title">
-          <div className="section-heading"><p className="eyebrow">02 / Our app</p><h2 id="apps-title">Meet Next Idea.</h2></div>
-          <article className="app-card">
-            <div className="app-icon"><Image src="/logo.png" alt="Next Idea app icon" width={96} height={96} /></div>
-            <div className="app-description"><p className="eyebrow">iPhone · iPad · Mac</p><h3>Room for your next idea.</h3><p>Capture your thoughts, organize your projects, and decide what to do next. Next Idea helps you bring a little order to a busy day.</p><div className="app-links"><a className="button" href="https://apps.apple.com/es/app/next-idea/id6448846931?l=en-GB" target="_blank" rel="noopener noreferrer">View on the App Store <span aria-hidden="true">↗</span></a><a className="text-link" href="/tutorials">App guides <span aria-hidden="true">→</span></a></div></div>
-          </article>
+        <section id="services" className="company-section" aria-labelledby="services-title">
+          <div className="section-heading"><p className="eyebrow">02 / What we do</p><h2 id="services-title">Advice and development.</h2></div>
+          <div className="services-grid">
+            <article className="service-card">
+              <p className="eyebrow">Consulting</p>
+              <h3>Clarity before complexity.</h3>
+              <p>Practical guidance for digital projects, from exploring an idea and defining priorities to planning the next steps.</p>
+            </article>
+            <article className="service-card">
+              <p className="eyebrow">iOS app development</p>
+              <h3>Built around people.</h3>
+              <p>Native iOS applications with thoughtful interfaces and focused functionality, designed to feel at home on Apple devices.</p>
+            </article>
+          </div>
         </section>
 
-        <section id="contact" className="company-section contact-section" aria-labelledby="contact-title">
-          <div><p className="eyebrow">03 / Get in touch</p><h2 id="contact-title">Let’s talk.</h2><p>For company enquiries, questions about Next Idea, or app support, contact us by email.</p><a className="contact-email" href="mailto:next-idea@outlook.com">next-idea@outlook.com <span aria-hidden="true">↗</span></a></div>
-          <dl className="company-details"><div><dt>Company</dt><dd>Inspiraeon SL</dd></div><div><dt>What we do</dt><dd>Software development for Apple platforms</dd></div><div><dt>Our product</dt><dd>Next Idea</dd></div></dl>
+        <section id="approach" className="company-section contact-section" aria-labelledby="approach-title">
+          <div><p className="eyebrow">03 / Our approach</p><h2 id="approach-title">Make every step count.</h2><p>Understand the problem. Focus on what matters. Build with care. We bring this approach to both our consulting work and our software development.</p></div>
+          <dl className="company-details"><div><dt>Company</dt><dd>Inspiraeon SL</dd></div><div><dt>Services</dt><dd>Consulting and iOS app development</dd></div><div><dt>Focus</dt><dd>Clear ideas. Useful software.</dd></div></dl>
         </section>
       </main>
       <Footer />
